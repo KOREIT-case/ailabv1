@@ -1,0 +1,367 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>LG 리모컨</title>
+<style>
+  :root{
+    --bg:#101418; --panel:#1a2027; --panel2:#232b34;
+    --line:#2e3944; --txt:#e8edf2; --dim:#7d8a96;
+    --accent:#c9435a; /* LG magic remote red-pink */
+    --ok:#3fae6a;
+  }
+  *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+  html,body{height:100%;}
+  body{
+    background:var(--bg); color:var(--txt);
+    font-family:'Pretendard','Apple SD Gothic Neo','Noto Sans KR',sans-serif;
+    display:flex; flex-direction:column; padding:14px; gap:12px;
+    user-select:none; -webkit-user-select:none; touch-action:manipulation;
+    max-width:480px; margin:0 auto;
+  }
+  /* ── 연결 바 ── */
+  .connbar{display:flex; gap:8px; align-items:center;}
+  .connbar input{
+    flex:1; min-width:0; background:var(--panel); border:1px solid var(--line);
+    border-radius:10px; padding:12px 14px; color:var(--txt); font-size:16px;
+  }
+  .connbar button{
+    background:var(--accent); border:none; border-radius:10px;
+    padding:12px 18px; color:#fff; font-size:15px; font-weight:700;
+  }
+  #status{font-size:13px; color:var(--dim); min-height:18px; line-height:1.4;}
+  #status.ok{color:var(--ok);}
+  #status.err{color:var(--accent);}
+
+  /* ── 터치패드 (포인터 모드) ── */
+  #pad{
+    flex:1; min-height:200px; background:var(--panel);
+    border:1px solid var(--line); border-radius:16px;
+    display:flex; align-items:center; justify-content:center;
+    color:var(--dim); font-size:14px; letter-spacing:0.02em;
+    touch-action:none; position:relative; overflow:hidden;
+  }
+  #pad.active{border-color:var(--accent);}
+  #pad .hint{pointer-events:none; text-align:center; line-height:1.7;}
+
+  /* ── 버튼 공통 ── */
+  .btn{
+    background:var(--panel2); border:1px solid var(--line); border-radius:12px;
+    color:var(--txt); font-size:15px; font-weight:600;
+    display:flex; align-items:center; justify-content:center;
+    height:56px;
+  }
+  .btn:active{background:var(--accent); border-color:var(--accent);}
+  .btn.sub{color:var(--dim); font-size:13px;}
+
+  /* ── 방향키 ── */
+  .dpad{
+    display:grid; grid-template-columns:repeat(3,1fr); gap:8px;
+  }
+  .dpad .btn{height:60px; font-size:20px;}
+  .dpad .ok{background:var(--accent); border-color:var(--accent); font-size:15px; font-weight:800;}
+
+  /* ── 하단 행 ── */
+  .row{display:grid; grid-template-columns:repeat(4,1fr); gap:8px;}
+  .row .btn{height:50px; font-size:14px;}
+</style>
+</head>
+<body>
+
+<div class="connbar">
+  <button id="connectBtn" style="flex:1;">TV 연결</button>
+</div>
+<div id="status">TV와 같은 와이파이에서 IP 입력 후 연결하세요.</div>
+<a id="certBtn" href="https://192.168.219.133:3001" target="_blank" style="display:none;background:#232b34;border:1px solid #c9435a;border-radius:10px;padding:12px;color:#e8edf2;text-align:center;text-decoration:none;font-size:14px;font-weight:700;">TV 인증서 승인하러 가기 (최초 1회)</a>
+<input id="keybox" readonly style="display:none;background:#1a2027;border:1px dashed #2e3944;border-radius:8px;padding:8px 10px;color:#7d8a96;font-size:12px;" onclick="this.select();document.execCommand('copy');this.style.color='#3fae6a';" title="탭하면 복사됩니다">
+
+<div id="pad">
+  <div class="hint">포인터 영역<br>누른 채 폰을 움직이거나 기울이면 포인터 이동<br>짧게 탭 = 클릭 · 두 손가락 = 스크롤</div>
+</div>
+
+<div class="dpad">
+  <button class="btn sub" data-btn="BACK">뒤로</button>
+  <button class="btn" data-btn="UP">▲</button>
+  <button class="btn sub" data-btn="EXIT">나가기</button>
+  <button class="btn" data-btn="LEFT">◀</button>
+  <button class="btn ok" data-btn="ENTER">확인</button>
+  <button class="btn" data-btn="RIGHT">▶</button>
+  <button class="btn sub" data-btn="HOME">홈</button>
+  <button class="btn" data-btn="DOWN">▼</button>
+  <button class="btn sub" id="powerBtn">전원끔</button>
+</div>
+
+<div class="row">
+  <button class="btn" data-btn="VOLUMEDOWN">🔉 −</button>
+  <button class="btn" data-btn="VOLUMEUP">🔊 +</button>
+  <button class="btn" data-btn="MUTE">무음</button>
+  <button class="btn" data-btn="PLAY">▶︎/❚❚</button>
+</div>
+<div class="row">
+  <button class="btn" id="netflixBtn" style="grid-column:span 2;color:#e50914;font-weight:800;font-size:16px;">NETFLIX</button>
+  <button class="btn" id="youtubeBtn" style="grid-column:span 2;color:#ff4e45;font-weight:800;font-size:16px;">YouTube</button>
+</div>
+
+<script>
+/* ─────────────────────────────────────────────
+   LG webOS 로컬 제어 (SSAP)
+   메인 소켓: ws://IP:3000  →  register(PROMPT) → client-key
+   포인터 소켓: ssap://com.webos.service.networkinput/getPointerInputSocket
+   페어링 매니페스트: hobbyquaker/lgtv2 pairing.json 원문 그대로
+───────────────────────────────────────────── */
+const PAIRING = {
+  "forcePairing": false,
+  "pairingType": "PROMPT",
+  "manifest": {
+    "manifestVersion": 1,
+    "appVersion": "1.1",
+    "signed": {
+      "created": "20140509",
+      "appId": "com.lge.test",
+      "vendorId": "com.lge",
+      "localizedAppNames": {"": "LG Remote App", "ko-KR": "리모컨 앱", "zxx-XX": "ЛГ Rэмotэ AПП"},
+      "localizedVendorNames": {"": "LG Electronics"},
+      "permissions": ["TEST_SECURE","CONTROL_INPUT_TEXT","CONTROL_MOUSE_AND_KEYBOARD","READ_INSTALLED_APPS","READ_LGE_SDX","READ_NOTIFICATIONS","SEARCH","WRITE_SETTINGS","WRITE_NOTIFICATION_ALERT","CONTROL_POWER","READ_CURRENT_CHANNEL","READ_RUNNING_APPS","READ_UPDATE_INFO","UPDATE_FROM_REMOTE_APP","READ_LGE_TV_INPUT_EVENTS","READ_TV_CURRENT_TIME"],
+      "serial": "2f930e2d2cfe083771f68e4fe7bb07"
+    },
+    "permissions": ["LAUNCH","LAUNCH_WEBAPP","APP_TO_APP","CLOSE","TEST_OPEN","TEST_PROTECTED","CONTROL_AUDIO","CONTROL_DISPLAY","CONTROL_INPUT_JOYSTICK","CONTROL_INPUT_MEDIA_RECORDING","CONTROL_INPUT_MEDIA_PLAYBACK","CONTROL_INPUT_TV","CONTROL_POWER","READ_APP_STATUS","READ_CURRENT_CHANNEL","READ_INPUT_DEVICE_LIST","READ_NETWORK_STATE","READ_RUNNING_APPS","READ_TV_CHANNEL_LIST","WRITE_NOTIFICATION_TOAST","READ_POWER_STATE","READ_COUNTRY_INFO","READ_SETTINGS","CONTROL_TV_SCREEN","CONTROL_TV_STANBY","CONTROL_FAVORITE_GROUP","CONTROL_USER_INFO","CHECK_BLUETOOTH_DEVICE","CONTROL_BLUETOOTH","CONTROL_TIMER_INFO","STB_INTERNAL_CONNECTION","CONTROL_RECORDING","READ_RECORDING_STATE","WRITE_RECORDING_LIST","READ_RECORDING_LIST","READ_RECORDING_SCHEDULE","WRITE_RECORDING_SCHEDULE","READ_STORAGE_DEVICE_LIST","READ_TV_PROGRAM_INFO","CONTROL_BOX_CHANNEL","READ_TV_ACR_AUTH_TOKEN","READ_TV_CONTENT_STATE","READ_TV_CURRENT_TIME","ADD_LAUNCHER_CHANNEL","SET_CHANNEL_SKIP","RELEASE_CHANNEL_SKIP","CONTROL_CHANNEL_BLOCK","DELETE_SELECT_CHANNEL","CONTROL_CHANNEL_GROUP","SCAN_TV_CHANNELS","CONTROL_TV_POWER","CONTROL_WOL"],
+    "signatures": [{"signatureVersion":1,"signature":"eyJhbGdvcml0aG0iOiJSU0EtU0hBMjU2Iiwia2V5SWQiOiJ0ZXN0LXNpZ25pbmctY2VydCIsInNpZ25hdHVyZVZlcnNpb24iOjF9.hrVRgjCwXVvE2OOSpDZ58hR+59aFNwYDyjQgKk3auukd7pcegmE2CzPCa0bJ0ZsRAcKkCTJrWo5iDzNhMBWRyaMOv5zWSrthlf7G128qvIlpMT0YNY+n/FaOHE73uLrS/g7swl3/qH/BGFG2Hu4RlL48eb3lLKqTt2xKHdCs6Cd4RMfJPYnzgvI4BNrFUKsjkcu+WD4OO2A27Pq1n50cMchmcaXadJhGrOqH5YmHdOCj5NSHzJYrsW0HPlpuAx/ECMeIZYDh6RMqaFM2DXzdKX9NmmyqzJ3o/0lkk/N97gfVRLW5hA29yeAwaCViZNCP8iC9aO0q9fQojoa7NQnAtw=="}]
+  }
+};
+
+const $ = s => document.querySelector(s);
+const statusEl = $('#status');
+let ws = null, ptrWs = null, msgId = 0;
+const pending = {}; // id → callback
+
+function setStatus(t, cls){ statusEl.textContent = t; statusEl.className = cls || ''; }
+
+/* client-key 저장 (localStorage 불가 환경 대비 폴백) */
+const DEFAULT_CLIENT_KEY = 'fa8a53101f39bf690466c46ed8b0ee4c'; // 승인 팝업 생략용
+const mem = {};
+function saveKey(ip, key){ try{ localStorage.setItem('lgkey_'+ip, key); }catch(e){ mem[ip]=key; } }
+function loadKey(ip){ try{ return localStorage.getItem('lgkey_'+ip) || mem[ip] || DEFAULT_CLIENT_KEY; }catch(e){ return mem[ip] || DEFAULT_CLIENT_KEY; } }
+function saveIp(ip){ try{ localStorage.setItem('lg_last_ip', ip); }catch(e){} }
+const DEFAULT_IP = '192.168.219.133';
+function loadIp(){ try{ return localStorage.getItem('lg_last_ip') || DEFAULT_IP; }catch(e){ return DEFAULT_IP; } }
+
+function request(uri, payload, cb){
+  if(!ws || ws.readyState !== 1) return;
+  const id = 'req_' + (++msgId);
+  if(cb) pending[id] = cb;
+  ws.send(JSON.stringify({ type:'request', id, uri, payload: payload || {} }));
+}
+
+function connect(){
+  const ip = DEFAULT_IP;
+  if(ws){ try{ ws.close(); }catch(e){} }
+  if(ptrWs){ try{ ptrWs.close(); }catch(e){} ptrWs = null; }
+  setStatus('연결 중… (wss://' + ip + ':3001)');
+
+  try{ ws = new WebSocket('wss://' + ip + ':3001'); }
+  catch(e){ setStatus('WebSocket 생성 실패: ' + e.message, 'err'); return; }
+
+  ws.onopen = () => {
+    setStatus('페어링 요청 중… TV 화면에 뜨면 [예]를 눌러주세요.');
+    const payload = Object.assign({}, PAIRING);
+    const key = loadKey(ip);
+    if(key) payload['client-key'] = key;
+    ws.send(JSON.stringify({ type:'register', id:'register_0', payload }));
+  };
+
+  ws.onmessage = ev => {
+    let msg; try{ msg = JSON.parse(ev.data); }catch(e){ return; }
+    if(msg.type === 'registered'){
+      if(msg.payload && msg.payload['client-key']){
+        saveKey(ip, msg.payload['client-key']);
+      }
+      setStatus('TV 연결됨 ✓ 포인터 소켓 여는 중…', 'ok');
+      openPointerSocket();
+      return;
+    }
+    if(msg.type === 'error'){
+      setStatus('TV 오류: ' + (msg.error || '알 수 없음'), 'err');
+      return;
+    }
+    if(msg.id && pending[msg.id]){ pending[msg.id](msg.payload); delete pending[msg.id]; }
+  };
+
+  ws.onerror = () => {
+    setStatus('연결 실패. 처음이면 TV 인증서 승인이 필요합니다 — 아래 버튼으로 이동해 "고급 → 계속 이동"을 누른 뒤 돌아와 다시 [TV 연결]. 그래도 안 되면 같은 와이파이/모바일 TV 켜기 설정을 확인하세요.', 'err');
+    document.getElementById('certBtn').style.display = 'block';
+  };
+  ws.onclose = () => {
+    if(statusEl.className !== 'err') setStatus('연결이 끊겼습니다. 다시 [연결]을 누르세요.');
+    ptrWs = null;
+  };
+}
+
+function openPointerSocket(){
+  request('ssap://com.webos.service.networkinput/getPointerInputSocket', {}, payload => {
+    if(!payload || !payload.socketPath){
+      setStatus('포인터 소켓 획득 실패 (버튼 일부만 동작할 수 있음)', 'err'); return;
+    }
+    ptrWs = new WebSocket(payload.socketPath);
+    ptrWs.onopen = () => setStatus('리모컨 준비 완료 ✓', 'ok');
+    ptrWs.onerror = () => setStatus('포인터 소켓 오류', 'err');
+    ptrWs.onclose = () => { ptrWs = null; };
+  });
+}
+
+/* 포인터 소켓 메시지: "key:value" 줄 + 빈 줄 종료 */
+function ptrSend(type, payload){
+  if(!ptrWs || ptrWs.readyState !== 1) return;
+  let m = 'type:' + type + '\n';
+  for(const k in (payload||{})) m += k + ':' + payload[k] + '\n';
+  ptrWs.send(m + '\n');
+}
+
+/* ── 버튼 바인딩 ── */
+document.querySelectorAll('[data-btn]').forEach(b => {
+  b.addEventListener('click', () => ptrSend('button', { name: b.dataset.btn }));
+});
+$('#powerBtn').addEventListener('click', () => {
+  if(confirm('TV 전원을 끌까요?')) request('ssap://system/turnOff', {});
+});
+$('#connectBtn').addEventListener('click', connect);
+$('#netflixBtn').addEventListener('click', () => request('ssap://system.launcher/launch', {id:'netflix'}));
+$('#youtubeBtn').addEventListener('click', () => request('ssap://system.launcher/launch', {id:'youtube.leanback.v4'}));
+
+/* ── 포인터: 폰 움직임(자이로) = 포인터 이동, 탭 = 클릭 ──
+   매직리모컨처럼 각속도(deg/s)를 포인터 이동량으로 변환.
+   패드를 누르고 있는 동안만 활성 (오작동 방지). 모션 센서가
+   안 잡히는 환경에서는 기존 드래그 방식으로 자동 폴백. */
+const pad = $('#pad');
+const MOTION_SPEED = 8;   // px per degree (감도)
+const DEADZONE = 1.5;     // deg/s 미만 무시 (손떨림/드리프트 방지)
+let holding = false, motionSeen = false, motionSent = 0;
+let motionEvents = 0, diagShown = false;
+let last = null, dragMoved = 0, twoFinger = false, lastY2 = null;
+const DRAG_SPEED = 2.1;
+
+let accelSeen = false, gLP = null, tiltRef = null;
+const TILT_SPEED = 1.3;   // px per degree per event (기울기 모드 감도)
+const TILT_DEAD = 2.5;    // 기준 대비 이 각도(도) 이내는 정지
+function onMotion(e){
+  motionEvents++;
+  /* 가속도(중력) 스트림 — 자이로가 죽어도 이걸로 기울기 모드 */
+  const ag = e.accelerationIncludingGravity;
+  if(ag && ag.x !== null){
+    accelSeen = true;
+    gLP = gLP ? {x:gLP.x*0.8+ag.x*0.2, y:gLP.y*0.8+ag.y*0.2, z:gLP.z*0.8+ag.z*0.2} : {x:ag.x, y:ag.y, z:ag.z};
+  }
+  if(!holding) return;
+  const rr = e.rotationRate;
+  if(!rr || (rr.beta === null && rr.gamma === null)){
+    tiltMove();
+    return;
+  }
+  motionSeen = true;
+  const dt = (e.interval && e.interval < 1) ? e.interval : (e.interval ? e.interval/1000 : 1/60);
+  let gx = rr.gamma || 0; // y축 회전(좌우 겨냥)
+  let gy = rr.beta  || 0; // x축 회전(상하 겨냥)
+  if(Math.abs(gx) < DEADZONE) gx = 0;
+  if(Math.abs(gy) < DEADZONE) gy = 0;
+  const dx = Math.round(-gx * dt * MOTION_SPEED * 10) / 10 | 0;
+  const dy = Math.round(-gy * dt * MOTION_SPEED * 10) / 10 | 0;
+  if(dx || dy){
+    ptrSend('move', {dx, dy, down:0});
+    motionSent += Math.abs(dx) + Math.abs(dy);
+  }
+}
+function tiltAngles(){
+  if(!gLP) return null;
+  const {x,y,z} = gLP;
+  const roll  = Math.atan2(-x, Math.sqrt(y*y+z*z)) * 180/Math.PI; // 좌우 기울기
+  const pitch = Math.atan2(-z, Math.sqrt(x*x+y*y)) * 180/Math.PI; // 앞뒤 기울기
+  return {roll, pitch};
+}
+function tiltMove(){
+  if(!accelSeen || !tiltRef) return;
+  const a = tiltAngles();
+  if(!a) return;
+  let dr = a.roll - tiltRef.roll;
+  let dp = a.pitch - tiltRef.pitch;
+  if(Math.abs(dr) < TILT_DEAD) dr = 0; else dr -= Math.sign(dr)*TILT_DEAD;
+  if(Math.abs(dp) < TILT_DEAD) dp = 0; else dp -= Math.sign(dp)*TILT_DEAD;
+  const dx = Math.round(dr * TILT_SPEED);
+  const dy = Math.round(dp * TILT_SPEED);
+  if(dx || dy){
+    ptrSend('move', {dx, dy, down:0});
+    motionSent += Math.abs(dx) + Math.abs(dy);
+  }
+}
+window.addEventListener('devicemotion', onMotion);
+
+/* 2차 소스: 자이로 회전값이 비면 방향각(나침반 alpha + 기울기 beta) 변화량 사용 */
+let oriPrev = null, oriSeen = false;
+const ORI_SPEED = 9; // px per degree
+function wrap180(d){ if(d > 180) d -= 360; if(d < -180) d += 360; return d; }
+window.addEventListener('deviceorientation', e => {
+  if(e.alpha === null && e.beta === null) return;
+  oriSeen = true;
+  if(!holding || motionSeen){ oriPrev = null; return; } // 자이로가 살아있으면 그쪽 우선
+  if(oriPrev === null){ oriPrev = {a:e.alpha, b:e.beta}; return; }
+  const da = wrap180(e.alpha - oriPrev.a); // 좌우 겨냥 (나침반)
+  const db = e.beta - oriPrev.b;           // 상하 기울기
+  oriPrev = {a:e.alpha, b:e.beta};
+  const dx = Math.round(-da * ORI_SPEED);
+  const dy = Math.round(-db * ORI_SPEED);
+  if(dx || dy){
+    ptrSend('move', {dx, dy, down:0});
+    motionSent += Math.abs(dx) + Math.abs(dy);
+  }
+});
+
+pad.addEventListener('touchstart', e => {
+  pad.classList.add('active');
+  if(e.touches.length >= 2){ twoFinger = true; lastY2 = e.touches[0].clientY; }
+  else {
+    twoFinger = false; holding = true; motionSent = 0; oriPrev = null; tiltRef = tiltAngles();
+    last = {x:e.touches[0].clientX, y:e.touches[0].clientY};
+    dragMoved = 0;
+    if(!diagShown) setTimeout(() => {
+      if(motionEvents === 0){
+        diagShown = true;
+        setStatus('모션센서 차단됨 (secureContext=' + window.isSecureContext + ', 이벤트 0회) → 드래그 모드로 동작 중. file:/// 주소로 열면 모션이 활성화됩니다.', 'err');
+      } else if(!motionSeen && motionEvents > 0){
+        diagShown = true;
+        if(accelSeen) setStatus('기울기 모드 동작 중 — 누른 채 폰을 기울인 방향으로 포인터가 흐릅니다 (자이로✗ 가속도✓)', 'ok');
+        else if(oriSeen) setStatus('방향센서 모드로 동작 중 (자이로✗ 방향✓)', 'ok');
+        else setStatus('자이로✗ 가속도✗ 방향✗ 전부 차단 → 드래그 모드', 'err');
+      }
+    }, 1000);
+  }
+}, {passive:true});
+
+pad.addEventListener('touchmove', e => {
+  e.preventDefault();
+  if(twoFinger && e.touches.length >= 2){
+    const y = e.touches[0].clientY;
+    const dy = y - lastY2;
+    if(Math.abs(dy) > 2){ ptrSend('scroll', {dx:0, dy: dy > 0 ? 1 : -1}); lastY2 = y; }
+    return;
+  }
+  /* 모션·방향 센서가 모두 없는 환경 폴백: 드래그로 이동 */
+  if(!motionSeen && !oriSeen && !accelSeen && last){
+    const t = e.touches[0];
+    const dx = Math.round((t.clientX - last.x) * DRAG_SPEED);
+    const dy = Math.round((t.clientY - last.y) * DRAG_SPEED);
+    if(dx || dy){
+      ptrSend('move', {dx, dy, down:0});
+      dragMoved += Math.abs(dx) + Math.abs(dy);
+      last = {x:t.clientX, y:t.clientY};
+    }
+  }
+}, {passive:false});
+
+pad.addEventListener('touchend', e => {
+  pad.classList.remove('active');
+  if(!twoFinger && motionSent < 12 && dragMoved < 8) ptrSend('click');
+  holding = false; last = null; twoFinger = false;
+}, {passive:true});
+
+</script>
+</body>
+</html>
