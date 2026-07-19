@@ -191,8 +191,11 @@ function connect(){
     setStatus('연결 실패. 처음이면 TV 인증서 승인이 필요합니다 — 아래 버튼으로 이동해 "고급 → 계속 이동"을 누른 뒤 돌아와 다시 [TV 연결]. 그래도 안 되면 같은 와이파이/모바일 TV 켜기 설정을 확인하세요.', 'err');
     document.getElementById('certBtn').style.display = 'block';
   };
-  ws.onclose = () => {
-    if(statusEl.className !== 'err') setStatus('연결이 끊겼습니다. 다시 [연결]을 누르세요.');
+  ws.onclose = ev => {
+    if(statusEl.className !== 'err'){
+      setStatus('연결 종료 (code ' + ev.code + (ev.reason ? ', ' + ev.reason : '') + '). code 1006이면 TLS/인증서 문제일 가능성이 큽니다 — 아래 버튼으로 인증서를 승인하세요.', 'err');
+      document.getElementById('certBtn').style.display = 'block';
+    }
     ptrWs = null;
   };
 }
