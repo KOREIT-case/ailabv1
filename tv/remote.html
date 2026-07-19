@@ -262,7 +262,7 @@ function onMotion(e){
   if(Math.abs(gx) < DEADZONE) gx = 0;
   if(Math.abs(gy) < DEADZONE) gy = 0;
   const dx = Math.round(-gx * dt * MOTION_SPEED_X * 10) / 10 | 0;
-  const dy = Math.round(-gy * dt * MOTION_SPEED_Y * 10) / 10 | 0;
+  const dy = Math.round(gy * dt * MOTION_SPEED_Y * 10) / 10 | 0;
   if(dx || dy){ ptrSend('move', {dx, dy, down:0}); motionSent += Math.abs(dx)+Math.abs(dy); }
 }
 window.addEventListener('devicemotion', onMotion);
