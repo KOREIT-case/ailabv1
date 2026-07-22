@@ -1,0 +1,21 @@
+# 의존성
+node_modules/
+
+# 환경변수·비밀 (API 키는 절대 커밋 금지)
+.env
+.env.*
+.dev.vars
+*.key
+
+# 빌드 산출물 / 벡터 인덱스 (재생성 가능)
+dist/
+build/
+*.sqlite
+*.db
+index/vectors/
+
+# OS / 에디터
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
