@@ -90,12 +90,30 @@ function stripFalseRefusal(text) {
   return text;
 }
 
+// 답변에 실제로 인용된 근거만 남긴다(검색은 됐지만 답변에 안 쓰인 조문은 근거 표시 X).
+function usedSources(sources, answer) {
+  const used = sources.filter((s) => {
+    if (s.자료유형 === "판례") return s.사건번호 && answer.includes(s.사건번호);
+    const m = (s.조문 || "").match(/제\d+조(?:의\d+)?/); // "제12조", "제2조 나목"→"제2조"
+    return m && answer.includes(m[0]);
+  });
+  // 중복(법령명+조문) 제거
+  const seen = new Set();
+  const dedup = used.filter((s) => {
+    const k = (s.법령명 || "") + "|" + (s.조문 || "").replace(/\s.*$/, "");
+    if (seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  });
+  return dedup.length ? dedup : sources.slice(0, 3); // 매칭 실패 시 상위 3개 폴백
+}
+
 /** 이미 검색된 hits로 답변 생성 (하이브리드 검색을 worker에서 수행 후 호출) */
 export async function generate(question, history, env, hits) {
   if (!hits.length) return { answer: NO_EVIDENCE, sources: [], retrieved: [] };
   const systemMessage = buildSystemMessage(hits);
   const text = stripFalseRefusal(await callDeepSeek(env, systemMessage, history, question));
-  return { answer: text, sources: toSources(hits), retrieved: hits };
+  return { answer: text, sources: usedSources(toSources(hits), text), retrieved: hits };
 }
 
 /** BM25 단독 경로 (로컬 테스트용). worker는 하이브리드를 쓴다. */

@@ -22,3 +22,6 @@ Thumbs.db
 
 # corpus 검색 인덱스 (build-index.mjs로 재생성 → KV 업로드. 번들/커밋 불필요)
 chatbot/worker/corpus-index.json
+
+# Cloudflare Wrangler 로컬 캐시
+chatbot/worker/.wrangler/

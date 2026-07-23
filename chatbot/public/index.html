@@ -30,6 +30,8 @@
   .bot{align-self:flex-start;background:var(--panel);border:1px solid var(--border)}
   .bot .src{margin-top:8px;padding-top:8px;border-top:1px dashed var(--border);
     font-size:12px;color:var(--dim)}
+  .bot .src .key{color:var(--accent);font-weight:600} /* 핵심 법리(최상위 근거) 강조 */
+  .bot .src .arts{color:var(--text)} /* 조문 번호는 조금 더 또렷하게 */
   .bot strong{color:#fff;font-weight:700}
   .bot code{background:#0c0e12;padding:1px 5px;border-radius:5px;font-size:13px}
   .bot ul{margin:6px 0;padding-left:20px}
@@ -221,17 +223,34 @@
     if (sources && sources.length){
       const s = document.createElement("div");
       s.className = "src";
-      s.textContent = "근거: " + sources.map(fmt).join(" · ");
+      s.innerHTML = "근거: " + buildSrc(sources);
       el.appendChild(s);
     }
     chat.appendChild(el);
     chat.scrollTop = chat.scrollHeight;
     return el;
   }
-  function fmt(m){
-    if(m.자료유형==="판례") return `${m.법령명||("판례 "+(m.사건번호||""))}`.trim();
-    if(m.자료유형==="유권해석") return `유권해석 ${m.문서번호||""}`;
-    return `${m.법령명||""} ${m.조문||""}`.trim(); // 법령·행정규칙(고시)
+  // 근거 표기: 같은 법은 하나로 묶어 조문만 나열, 맨 위(핵심 법리) 법령명은 강조.
+  function buildSrc(sources){
+    const groups = [];        // [{name, arts:[], prec}]
+    const idx = new Map();     // 법령명 → groups 인덱스 (같은 법 묶기)
+    for (const m of sources){
+      if (m.자료유형 === "판례"){
+        groups.push({ name: m.법령명 || ("판례 " + (m.사건번호 || "")), arts: [], prec: true });
+        continue;
+      }
+      const name = m.자료유형 === "유권해석" ? ("유권해석 " + (m.문서번호 || "")) : (m.법령명 || "");
+      const art = (m.조문 || "").trim();
+      if (!idx.has(name)){ idx.set(name, groups.length); groups.push({ name, arts: [] }); }
+      if (art) groups[idx.get(name)].arts.push(art);
+    }
+    return groups.map((g, i) => {
+      const nameHtml = i === 0
+        ? `<span class="key">${esc(g.name)}</span>`   // 핵심 법리 강조
+        : esc(g.name);
+      const arts = g.arts.length ? ` <span class="arts">${esc(g.arts.join("·"))}</span>` : "";
+      return nameHtml + arts;
+    }).join(" · ");
   }
 
   form.addEventListener("submit", async (e) => {
