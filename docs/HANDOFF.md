@@ -65,44 +65,44 @@ ailabv1/
 
 ## 5. ★ 새 세션에서 할 일 (바로 이것부터)
 
-**작업: 도시정비법 3종을 국가법령정보 API로 받아 `corpus/laws/`에 md로 변환.**
+**작업: KV 네임스페이스 생성 → corpus-index 업로드 → 시크릿 등록 → 재배포.**
+(코드는 이미 준비됨. 아래는 Cloudflare 계정 접근이 되는 환경에서 실행만 하면 된다.)
 
-대상 (당일 Step 1으로 MST 재확인할 것 — 아래는 2026.07 기준 참고값):
+corpus 는 이제 Worker 번들이 아니라 Cloudflare KV(`CORPUS_KV`)에서 서빙한다.
+worker.js 의 `loadIndex(env)` 가 콜드스타트에 KV `corpus-index` 키를 1회 읽어 캐시한다.
 
-| 법령명 | 참고 MST | 시행일 |
-|---|---|---|
-| 도시 및 주거환경정비법 | 284065 | 2026.07.01 |
-| 도시 및 주거환경정비법 시행령 | 287285 | 2026.07.01 |
-| 도시 및 주거환경정비법 시행규칙 | (검색 필요) | (검색 필요) |
+### 절차 (chatbot/worker 기준, wrangler 로그인 상태에서)
+1. `node scripts/build-index.mjs` — corpus-index.json 최신화 (이미 커밋돼 있으면 생략 가능)
+2. `npx wrangler kv namespace create CORPUS` — 출력 id 를
+   `chatbot/worker/wrangler.toml` 의 `[[kv_namespaces]]` id(`REPLACE_WITH_KV_NAMESPACE_ID`)에 기입
+3. `bash scripts/kv-upload.sh` — corpus-index.json → KV(`corpus-index` 키)
+4. `npx wrangler secret put DEEPSEEK_KEY` / `npx wrangler secret put SITE_PASSWORD`
+5. `npx wrangler deploy`
+6. 배포 주소를 `chatbot/public/index.html` 의 `WORKER_URL` 에 기입(자체 서빙이면 생략)
+7. **corpus 갱신 시**: 1) → 3) 만 반복(재배포 불필요, KV만 갱신).
 
-### 절차
-1. **스킬 로드**: `law-api-koreit` 스킬을 먼저 invoke (조회 규칙·파서 헬퍼 제공).
-2. **MST 재확인**: Step 1 검색으로 3종의 현재 MST·시행일·공포일·공포번호·소관부처 확보.
-   (`법령명한글 == 정확한 이름` 필터링 필수)
-3. **전문 XML 수신**: 각 법령 Step 2로 전체 XML 조회.
-4. **md 변환** — `docs/metadata-guide.md` 규칙 준수:
-   - front matter: 자료유형=법령, 법령명, 법령ID, 공포번호, 공포일자, 시행일자,
-     소관부처, 버전, 출처, 최종확인일
-   - 본문: 조문마다 `## 제N조(제목)` 헤딩. 항①②③/호1.2.3./목가.나.다. 원문 기호 유지.
-   - 장·절 제목 블록(`<조문여부>전문`)은 스킵. 가지번호 조문(제N조의M) 정확히 처리.
-   - 별표는 `### [별표 N] 제목` 헤딩으로 `get_tables()` 활용해 포함.
-   - **원문 그대로. 요약·의역 금지.** (예시 파일 `_예시_도시정비법.md`의 형식 참고, 단 그건 가짜 본문이니 실제 원문으로 채움)
-5. **파일 저장**: `corpus/laws/도시및주거환경정비법.md`, `...시행령.md`, `...시행규칙.md`
-   (예시 파일 `_예시_도시정비법.md`는 삭제해도 됨)
-6. **시행일 인덱스 갱신**: `index/법령_시행일_인덱스.md` 표에 3종 실제 값 기입(예시행 교체).
-7. **커밋 & 푸시**: 브랜치 `claude/claude-code-galaxy-tab-80kjy6`.
+### 참고 — 이번 세션(맥스)에서 이미 완료
+- 세금 법령 6종 corpus 추가: 지방세특례제한법·조세특례제한법·소득세법·종합부동산세법·
+  농어촌특별세법·지방세기본법 (법률 조문만. 소득세=총칙+양도소득, 조특법=정비사업 발췌).
+  → `corpus/laws/`, 시행일 인덱스, corpus-index.json(1,592 청크) 반영.
+- KV 전환 코드: `worker.js`(loadIndex), `wrangler.toml`([[kv_namespaces]]),
+  `scripts/kv-upload.sh` 신규.
+- 검색 검증 통과(취득세 감면→지특법 §74, 조합원입주권 양도세→소득세법 §89,
+  정비사업조합 과세특례→조특법 §104의7).
 
-### 변환 시 주의 (law-api-koreit 스킬 핵심)
-- 조문 인용에 시행일자 명시. CDATA 텍스트만 사용(XML 태그 금지).
-- 가지번호: 제14조의2 = 조문번호14 + 조문가지번호2 (사이 줄바꿈 있음).
-- 별표는 `<별표단위>` 태그에 별도 — 일반 조문 검색으로 안 잡힘. `get_tables()` 사용.
-- 한글 쿼리는 Python `quote()`로 URL 인코딩.
+### 세금 corpus 변환 방법 (재현/보강용)
+- 변환기 골격은 대화 기록의 `convert_tax.py` 참고. 핵심: `target=law` 전문 XML →
+  `<조문단위>` 순회, `조문여부=전문`(장절 제목) 스킵, `조문내용/항내용/호내용/목내용`
+  CDATA 를 문서순 추출, `## 제N조(제목)` 헤딩(가지번호=제N조의M), 조문 사이 빈 줄.
+- 소득세·조특법은 조항별 시행일이 나뉘어(1/1·7/1) 있어 현행 기준 시행일 **2026-07-01** 로 기록.
+- 서식성 별표는 제외(지방세법 방침과 동일). 감면 세부가 시행령에 있는 경우 후속 보강 대상.
 
 ## 6. 그 다음 로드맵 (참고)
-- 임베딩 모델 선정(한국어 법률) → 벡터 저장소 선정 → `scripts/build-index` 구현
+- 세금 시행령 보강(지특법·종부세 시행령의 감면 요건 세부)
 - `scripts/check-revisions` (개정 감지 알림) 구현
-- Worker 실제 구현(`worker.example.js` → `worker.js`), 프론트 실제 연결
+- 판례·유권해석 추가 → 대량화 시 임베딩/벡터검색 전환(`retrieve.mjs` 교체, 인터페이스 유지)
 - DeepSeek 한국어 법 해석 정확도 실측(샘플 질문셋)
 
 ---
-*작성: 이전 세션(갤탭, 네트워크 잠금). 이어받는 세션은 §5부터 시작.*
+*작성: 이전 세션(갤탭, 네트워크 잠금) → 갱신: 맥스 세션(세금 corpus + KV 전환).
+이어받는 세션은 §5(배포)부터 시작.*

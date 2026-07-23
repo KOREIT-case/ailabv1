@@ -6,11 +6,12 @@
  *
  * 배포 전 준비:
  *   1) node scripts/build-index.mjs         → corpus-index.json 생성/갱신
- *   2) wrangler secret put DEEPSEEK_KEY      → DeepSeek 키
- *   3) wrangler secret put SITE_PASSWORD     → 접속 비밀번호 (예: koreit)
- *   4) wrangler deploy
+ *   2) (최초 1회) wrangler kv namespace create CORPUS → id 를 wrangler.toml 에 기입
+ *   3) bash scripts/kv-upload.sh             → corpus-index.json 을 KV 에 업로드
+ *   4) wrangler secret put DEEPSEEK_KEY      → DeepSeek 키
+ *   5) wrangler secret put SITE_PASSWORD     → 접속 비밀번호 (예: koreit)
+ *   6) wrangler deploy
  */
-import index from "./corpus-index.json";
 import { answer } from "./pipeline.mjs";
 import CHAT_HTML from "../public/index.html"; // 채팅 화면 (wrangler Text 룰로 문자열 번들)
 import bg1 from "./bg/bg1.jpg"; // 배경 이미지 4종 (Data 룰 → ArrayBuffer)
@@ -18,6 +19,26 @@ import bg2 from "./bg/bg2.jpg";
 import bg3 from "./bg/bg3.jpg";
 import bg4 from "./bg/bg4.jpg";
 const BGS = { "1": bg1, "2": bg2, "3": bg3, "4": bg4 };
+
+/* ── corpus 인덱스: Cloudflare KV 에서 로드 ──
+ * corpus-index.json 은 Worker 번들에 넣지 않고 KV(CORPUS_KV)의 'corpus-index' 키에 둔다.
+ * → Worker 번들 1MB 한도와 무관하게 corpus(법령·판례·유권해석)를 계속 키울 수 있다.
+ * 콜드스타트에 KV에서 1회 읽어 파싱하고 모듈 스코프에 캐시 → 웜 요청은 재사용(0회 읽기).
+ * 업로드 절차: node scripts/build-index.mjs  →  bash scripts/kv-upload.sh
+ */
+let INDEX_CACHE = null;
+async function loadIndex(env) {
+  if (INDEX_CACHE) return INDEX_CACHE;
+  if (!env.CORPUS_KV) {
+    throw new Error("CORPUS_KV 바인딩이 없습니다 (wrangler.toml 의 [[kv_namespaces]] 확인).");
+  }
+  const data = await env.CORPUS_KV.get("corpus-index", { type: "json" });
+  if (!Array.isArray(data) || data.length === 0) {
+    throw new Error("KV에 corpus-index 가 없거나 비어 있습니다 — scripts/kv-upload.sh 로 업로드하세요.");
+  }
+  INDEX_CACHE = data;
+  return INDEX_CACHE;
+}
 
 function json(obj, status = 200, extraHeaders = {}) {
   return new Response(JSON.stringify(obj), {
@@ -117,6 +138,7 @@ export default {
       const { question, history = [] } = await request.json();
       if (!question || !question.trim()) return json({ error: "질문이 비어 있습니다" }, 400);
 
+      const index = await loadIndex(env);
       const { answer: text, sources } = await answer(index, question, history, env);
       return json({ answer: text, sources });
     } catch (e) {

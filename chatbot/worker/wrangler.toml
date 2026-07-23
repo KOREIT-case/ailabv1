@@ -2,12 +2,24 @@
 # 배포 절차:
 #   1) node scripts/build-index.mjs          # corpus-index.json 생성/갱신
 #   2) cd chatbot/worker
-#   3) npx wrangler secret put DEEPSEEK_KEY   # DeepSeek 키를 시크릿으로 등록 (코드/토ml에 넣지 말 것)
-#   4) npx wrangler deploy
-#   5) 배포 후 나온 *.workers.dev 주소를 chatbot/public/index.html 의 WORKER_URL 에 기입
+#   3) (최초 1회) npx wrangler kv namespace create CORPUS
+#        → 출력된 id 를 아래 [[kv_namespaces]] 의 id 에 붙여넣는다.
+#   4) bash ../../scripts/kv-upload.sh        # corpus-index.json → KV (번들에 넣지 않음)
+#   5) npx wrangler secret put DEEPSEEK_KEY   # DeepSeek 키 (코드/toml에 넣지 말 것)
+#   6) npx wrangler secret put SITE_PASSWORD  # 접속 비밀번호
+#   7) npx wrangler deploy
+#   8) 배포 후 나온 *.workers.dev 주소를 chatbot/public/index.html 의 WORKER_URL 에 기입
+# corpus 를 갱신할 때는 1) → 4) 만 다시 하면 된다(재배포 불필요, KV만 갱신).
 name = "dosijeongbi-chatbot"
 main = "worker.js"
 compatibility_date = "2026-07-23"
+
+# corpus 인덱스 저장소(KV). corpus-index.json 은 번들 대신 이 KV 에 둔다
+# → Worker 번들 1MB(무료) 한도와 무관하게 corpus 를 계속 키울 수 있다.
+# id 는 `wrangler kv namespace create CORPUS` 로 만든 값으로 교체할 것.
+[[kv_namespaces]]
+binding = "CORPUS_KV"
+id = "REPLACE_WITH_KV_NAMESPACE_ID"
 
 # 채팅 화면(../public/index.html)을 문자열로 번들에 포함 → GET 시 Worker가 직접 서빙.
 # 프론트는 chatbot/public/index.html 한 곳에서만 관리(단일 소스).
