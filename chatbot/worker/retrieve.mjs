@@ -140,6 +140,49 @@ export function retrieve(index, question, k = 5, allowedTypes = null) {
     .slice(0, k);
 }
 
+/**
+ * 하이브리드 검색: BM25(어휘) + 벡터(의미)를 RRF로 융합.
+ * @param {Array} index  청크 배열 (index[i].id === i 가정)
+ * @param {Int8Array} vectors  corpus 벡터(int8, 정규화됨). i번째 청크 = vectors[i*dim .. ]
+ * @param {Float32Array|number[]} queryVec  질의 임베딩(정규화된 float)
+ * @param {string} question
+ * @param {number} k
+ * @param {string[]|null} allowedTypes
+ */
+export function retrieveHybrid(index, vectors, queryVec, question, k = 5, allowedTypes = null, dim = 1024) {
+  // 어휘(BM25)로 후보군(top-20)을 뽑고, 그 후보 "안에서만" 벡터로 재순위한다.
+  // → 의미 검색이 관련 낮은 새 청크를 끌어와 정밀도를 떨어뜨리는 것을 방지(안전한 rerank).
+  const bm = retrieve(index, question, 20, allowedTypes);
+  if (bm.length <= 1) return bm.slice(0, k);
+
+  const withVec = bm.map((h, bmRank) => {
+    let dot = 0;
+    const off = h.chunk.id * dim;
+    for (let j = 0; j < dim; j++) dot += queryVec[j] * vectors[off + j];
+    return { chunk: h.chunk, bmRank, vec: dot };
+  });
+  const vRank = new Map();
+  [...withVec].sort((a, b) => b.vec - a.vec).forEach((x, r) => vRank.set(x.chunk.id, r));
+
+  // RRF 융합(어휘 순위 + 벡터 순위). 어휘 후보 안에서 의미까지 상위인 것을 끌어올림.
+  const RK = 20;
+  return withVec
+    .map((x) => ({
+      chunk: x.chunk,
+      score: 1 / (RK + x.bmRank) + 1 / (RK + vRank.get(x.chunk.id)),
+    }))
+    .sort((a, b) => b.score - a.score)
+    .slice(0, k);
+}
+
+/** 질의 임베딩 벡터를 L2 정규화 (코사인용) */
+export function normalizeVec(v) {
+  let n = 0;
+  for (const x of v) n += x * x;
+  n = Math.sqrt(n) || 1;
+  return v.map((x) => x / n);
+}
+
 /** 근거 인용 라벨. 법령: "…법 제64조 (시행 2026-07-01)" / 판례: "대법원 2005다68769 (선고 …)" */
 export function citation(chunk) {
   if (chunk.자료유형 === "판례") {

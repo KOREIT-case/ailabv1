@@ -16,6 +16,10 @@ compatibility_date = "2026-07-23"
 binding = "CORPUS_KV"
 id = "dfae6c10495d4a2cae9cd8ca707ff6be"
 
+# Workers AI 바인딩 — 임베딩(@cf/baai/bge-m3)을 런타임에 호출(벡터 하이브리드 검색).
+[ai]
+binding = "AI"
+
 # 채팅 화면(../public/index.html)을 문자열로 번들에 포함 → GET 시 Worker가 직접 서빙.
 # 프론트는 chatbot/public/index.html 한 곳에서만 관리(단일 소스).
 [[rules]]

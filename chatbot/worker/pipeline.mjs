@@ -63,14 +63,8 @@ export async function callDeepSeek(env, systemMessage, history, question) {
  * 전체 파이프라인: 질문 → 검색 → (근거 없으면 즉시 안내) → 생성.
  * @returns {{answer:string, sources:Array, retrieved:Array}}
  */
-export async function answer(index, question, history, env, k = 5, allowedTypes = null) {
-  const hits = retrieve(index, question, k, allowedTypes);
-  if (!hits.length) {
-    return { answer: NO_EVIDENCE, sources: [], retrieved: [] };
-  }
-  const systemMessage = buildSystemMessage(hits);
-  const text = await callDeepSeek(env, systemMessage, history, question);
-  const sources = hits.map((h) => ({
+function toSources(hits) {
+  return hits.map((h) => ({
     자료유형: h.chunk.자료유형,
     법령명: h.chunk.법령명,
     조문: h.chunk.조문,
@@ -78,5 +72,17 @@ export async function answer(index, question, history, env, k = 5, allowedTypes 
     사건번호: h.chunk.사건번호,
     선고일자: h.chunk.선고일자,
   }));
-  return { answer: text, sources, retrieved: hits };
+}
+
+/** 이미 검색된 hits로 답변 생성 (하이브리드 검색을 worker에서 수행 후 호출) */
+export async function generate(question, history, env, hits) {
+  if (!hits.length) return { answer: NO_EVIDENCE, sources: [], retrieved: [] };
+  const systemMessage = buildSystemMessage(hits);
+  const text = await callDeepSeek(env, systemMessage, history, question);
+  return { answer: text, sources: toSources(hits), retrieved: hits };
+}
+
+/** BM25 단독 경로 (로컬 테스트용). worker는 하이브리드를 쓴다. */
+export async function answer(index, question, history, env, k = 5, allowedTypes = null) {
+  return generate(question, history, env, retrieve(index, question, k, allowedTypes));
 }

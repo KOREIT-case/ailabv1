@@ -12,7 +12,8 @@
  *   5) wrangler secret put SITE_PASSWORD     → 접속 비밀번호 (예: koreit)
  *   6) wrangler deploy
  */
-import { answer } from "./pipeline.mjs";
+import { generate } from "./pipeline.mjs";
+import { retrieve, retrieveHybrid, normalizeVec } from "./retrieve.mjs";
 import CHAT_HTML from "../public/index.html"; // 채팅 화면 (wrangler Text 룰로 문자열 번들)
 import bg1 from "./bg/bg1.jpg"; // 배경 이미지 4종 (Data 룰 → ArrayBuffer)
 import bg2 from "./bg/bg2.jpg";
@@ -38,6 +39,25 @@ async function loadIndex(env) {
   }
   INDEX_CACHE = data;
   return INDEX_CACHE;
+}
+
+// corpus 벡터(int8, 정규화됨)를 KV에서 로드해 캐시. 하이브리드 검색의 의미 검색용.
+let VEC_CACHE = null;
+async function loadVectors(env) {
+  if (VEC_CACHE) return VEC_CACHE;
+  const buf = await env.CORPUS_KV.get("corpus-vectors", { type: "arrayBuffer" });
+  VEC_CACHE = buf ? new Int8Array(buf) : null;
+  return VEC_CACHE;
+}
+
+// 질의 → bge-m3 임베딩(정규화). 실패 시 null(어휘검색 폴백).
+async function embedQuery(env, q) {
+  try {
+    const r = await env.AI.run("@cf/baai/bge-m3", { text: [q] });
+    return r?.data?.[0] ? normalizeVec(r.data[0]) : null;
+  } catch (e) {
+    return null;
+  }
 }
 
 function json(obj, status = 200, extraHeaders = {}) {
@@ -77,6 +97,19 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
     const path = url.pathname;
+
+    // 임베딩 배치 (인증 필요) — corpus 임베딩 오케스트레이션·질의 임베딩에 사용.
+    if (request.method === "POST" && path === "/_embed") {
+      if (!(await isAuthed(request, env))) return json({ error: "unauthorized" }, 401);
+      try {
+        const { texts } = await request.json();
+        if (!Array.isArray(texts) || !texts.length) return json({ error: "texts 필요" }, 400);
+        const r = await env.AI.run("@cf/baai/bge-m3", { text: texts });
+        return json({ vectors: r.data });
+      } catch (e) {
+        return json({ error: String(e) }, 500);
+      }
+    }
 
     // 배경 이미지: GET /bg/N.jpg
     if (request.method === "GET" && path.startsWith("/bg/")) {
@@ -147,7 +180,12 @@ export default {
       const allowedTypes = SCOPE[scope] || SCOPE.law;
 
       const index = await loadIndex(env);
-      const { answer: text, sources } = await answer(index, question, history, env, 5, allowedTypes);
+      // 하이브리드 검색: 질의 임베딩 + corpus 벡터가 있으면 BM25+벡터 융합, 없으면 어휘검색.
+      const [vectors, qv] = await Promise.all([loadVectors(env), embedQuery(env, question)]);
+      const hits = (vectors && qv)
+        ? retrieveHybrid(index, vectors, qv, question, 5, allowedTypes)
+        : retrieve(index, question, 5, allowedTypes);
+      const { answer: text, sources } = await generate(question, history, env, hits);
       return json({ answer: text, sources });
     } catch (e) {
       return json({ error: String(e) }, 500);
