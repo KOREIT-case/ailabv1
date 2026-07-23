@@ -9,4 +9,11 @@ name = "dosijeongbi-chatbot"
 main = "worker.js"
 compatibility_date = "2026-07-23"
 
+# 채팅 화면(../public/index.html)을 문자열로 번들에 포함 → GET 시 Worker가 직접 서빙.
+# 프론트는 chatbot/public/index.html 한 곳에서만 관리(단일 소스).
+[[rules]]
+type = "Text"
+globs = ["**/*.html"]
+fallthrough = true
+
 # DEEPSEEK_KEY 는 시크릿으로만 주입한다 (wrangler secret put). 여기에 평문으로 쓰지 말 것.
