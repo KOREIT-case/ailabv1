@@ -175,6 +175,47 @@ export function retrieveHybrid(index, vectors, queryVec, question, k = 5, allowe
     .slice(0, k);
 }
 
+/**
+ * 참조 조문 자동 추적: 검색된 조문이 "제N조"를 참조하면 같은 법령의 그 조문도 추가.
+ * 위임·준용("제35조에 따른 동의요건 이상" 등)이 흔한 법률 특성상 정답 완성도를 크게 높인다.
+ * @param {Array} hits  retrieveHybrid/retrieve 결과
+ * @param {Array} index  전체 청크
+ */
+export function expandReferences(hits, index, allowedTypes = null, maxAdd = 4, fromTop = 3) {
+  const have = new Set(hits.map((h) => h.chunk.id));
+  const byRef = new Map(); // "법령명|제N조" → 본조 청크
+  for (const c of index) {
+    if (c.자료유형 === "판례") continue;
+    if (typeof c.조문 === "string" && /^제\d+조(?:의\d+)?$/.test(c.조문)) {
+      byRef.set(c.법령명 + "|" + c.조문, c);
+    }
+  }
+  const added = [];
+  for (const h of hits.slice(0, fromTop)) {
+    if (added.length >= maxAdd) break;
+    const t = h.chunk.text;
+    const seen = new Set();
+    for (const m of t.matchAll(/제(\d+)조(?:의(\d+))?/g)) {
+      // 타법 참조("「○○법」 제N조")는 스킵(제N조 앞 6자에 닫는 」).
+      if (t.slice(Math.max(0, m.index - 6), m.index).includes("」")) continue;
+      // ★위임/준용 참조만 따라간다 — 참조 뒤 40자 내에 "이상/준용/예에 따라/요건에 따라"가 있어야 함.
+      // (단순 인용 "제35조제3항에 따른 …자" 등은 답의 조작적 근거가 아니므로 제외해 노이즈 방지)
+      const after = t.slice(m.index, m.index + 40);
+      if (!/이상|준용|예에 따라|요건에 따라|요건 이상|에 준하여/.test(after)) continue;
+      const label = "제" + m[1] + "조" + (m[2] ? "의" + m[2] : "");
+      if (seen.has(label)) continue;
+      seen.add(label);
+      const c = byRef.get(h.chunk.법령명 + "|" + label);
+      if (c && !have.has(c.id) && (!allowedTypes || allowedTypes.includes(c.자료유형))) {
+        have.add(c.id);
+        added.push({ chunk: c, score: 0, ref: true });
+        if (added.length >= maxAdd) break;
+      }
+    }
+  }
+  return hits.concat(added);
+}
+
 /** 질의 임베딩 벡터를 L2 정규화 (코사인용) */
 export function normalizeVec(v) {
   let n = 0;

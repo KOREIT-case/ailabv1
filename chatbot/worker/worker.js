@@ -13,7 +13,7 @@
  *   6) wrangler deploy
  */
 import { generate } from "./pipeline.mjs";
-import { retrieve, retrieveHybrid, normalizeVec } from "./retrieve.mjs";
+import { retrieve, retrieveHybrid, normalizeVec, expandReferences } from "./retrieve.mjs";
 import CHAT_HTML from "../public/index.html"; // 채팅 화면 (wrangler Text 룰로 문자열 번들)
 import bg1 from "./bg/bg1.jpg"; // 배경 이미지 4종 (Data 룰 → ArrayBuffer)
 import bg2 from "./bg/bg2.jpg";
@@ -182,9 +182,12 @@ export default {
       const index = await loadIndex(env);
       // 하이브리드 검색: 질의 임베딩 + corpus 벡터가 있으면 BM25+벡터 융합, 없으면 어휘검색.
       const [vectors, qv] = await Promise.all([loadVectors(env), embedQuery(env, question)]);
-      const hits = (vectors && qv)
+      let hits = (vectors && qv)
         ? retrieveHybrid(index, vectors, qv, question, 5, allowedTypes)
         : retrieve(index, question, 5, allowedTypes);
+      // 참조 조문 추적 — "제N조에 따른/준용" 등 위임 참조를 따라가 정답 완성도↑ (판례 스코프 제외)
+      // 검색결과 전체를 스캔(핵심 조문이 상위 밖일 수 있음), 최대 8개 참조 추가.
+      if (scope !== "prec") hits = expandReferences(hits, index, allowedTypes, 3, hits.length);
       const { answer: text, sources } = await generate(question, history, env, hits);
       return json({ answer: text, sources });
     } catch (e) {
