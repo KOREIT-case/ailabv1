@@ -75,12 +75,32 @@ Cloudflare Worker. 요청당 다음을 수행:
       적합. 종단 테스트로 도정법 질문 정확 검색·답변 확인.
 - [x] DeepSeek 한국어 법 해석 정확도 1차 실측 (매도청구·조합원자격·결격사유 등 정답,
       범위 밖 질문은 규칙대로 거절 = 환각 방지 확인).
-- [ ] 벡터검색 전환: 판례·유권해석 대량 추가로 어휘검색 한계 시 임베딩+벡터저장소로
-      `retrieve.mjs` 교체 (인터페이스 `retrieve(index, question, k)` 유지).
+- [ ] 벡터검색 전환(스택 확정, 구현 보류): 아래 §6 결정대로 bge-m3 + Vectorize
+      하이브리드. 판례·유권해석 추가로 어휘검색 한계가 실제로 드러날 때 구현.
+      `retrieve.mjs` 인터페이스(`retrieve(index, question, k)`)는 유지.
+- [x] Cloudflare 배포 완료: https://dosijeongbi-chatbot.explozn87.workers.dev
+      (같은 URL이 GET=채팅화면·POST=API 겸함). 접근제한: 공용 비밀번호 로그인
+      (`SITE_PASSWORD` 시크릿) + HttpOnly 세션 쿠키. 마크다운 렌더링 적용.
 - [ ] 개정 감지 스크립트 구현 (`scripts/check-revisions`)
-- [ ] Cloudflare 실제 배포 (`chatbot/worker/wrangler.toml`, `wrangler secret put DEEPSEEK_KEY`)
 
 ### 초기 검색을 벡터가 아닌 어휘검색으로 시작한 이유
 corpus가 아직 수백 청크로 작고, 법률 질문은 조문의 법령 용어(매도청구·관리처분계획 등)를
 그대로 포함해 어휘검색 적중률이 높다. 임베딩 API·벡터DB 없이 즉시 배포·테스트 가능하고
 비용이 0이다. 자료가 커지면 `retrieve.mjs`만 벡터검색으로 교체한다(§4 설계 유지).
+
+## 6. 벡터저장소/임베딩 선정 (결정 완료 · 구현 보류)
+
+| 항목 | 결정 | 이유 |
+|---|---|---|
+| 임베딩 모델 | **Cloudflare Workers AI `@cf/baai/bge-m3`** | 다국어(한국어 법률 양호), Worker 바인딩으로 직접 호출, 외부 API·키 불필요, 저비용 |
+| 벡터저장소 | **Cloudflare Vectorize** | Worker 네이티브 벡터DB, 바인딩만으로 사용, 무료 티어, 별도 인프라 0 |
+| 검색 방식 | **하이브리드(BM25 + 벡터)** | 법률은 조문번호·정확용어 매칭이 중요 → BM25 유지, 벡터는 동의어·문맥 질문 보완 |
+
+**구현 시점**: 지금은 BM25-lite로 도정법 질문이 정확히 검색되어 벡터가 불필요.
+아래 시점에 구현한다.
+- 질문이 조문 표현과 다른 어휘로 들어와 어휘검색이 놓치는 사례가 쌓일 때
+- **판례·유권해석**을 대량 추가할 때(법령과 어휘가 달라 어휘검색만으론 약함)
+
+**구현 개요**(착수 시): ① Vectorize 인덱스 생성 → ② `scripts/build-index`에서 각 청크를
+bge-m3로 임베딩해 upsert → ③ Worker에 Vectorize·AI 바인딩 추가 → ④ `retrieve.mjs`를
+BM25 점수와 벡터 유사도를 합산하는 하이브리드로 확장(인터페이스 유지).

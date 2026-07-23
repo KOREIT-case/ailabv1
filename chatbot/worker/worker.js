@@ -13,6 +13,11 @@
 import index from "./corpus-index.json";
 import { answer } from "./pipeline.mjs";
 import CHAT_HTML from "../public/index.html"; // 채팅 화면 (wrangler Text 룰로 문자열 번들)
+import bg1 from "./bg/bg1.jpg"; // 배경 이미지 4종 (Data 룰 → ArrayBuffer)
+import bg2 from "./bg/bg2.jpg";
+import bg3 from "./bg/bg3.jpg";
+import bg4 from "./bg/bg4.jpg";
+const BGS = { "1": bg1, "2": bg2, "3": bg3, "4": bg4 };
 
 function json(obj, status = 200, extraHeaders = {}) {
   return new Response(JSON.stringify(obj), {
@@ -51,6 +56,19 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
     const path = url.pathname;
+
+    // 배경 이미지: GET /bg/N.jpg
+    if (request.method === "GET" && path.startsWith("/bg/")) {
+      const n = path.slice(4).replace(".jpg", "");
+      const img = BGS[n];
+      if (!img) return new Response("Not Found", { status: 404 });
+      return new Response(img, {
+        headers: {
+          "Content-Type": "image/jpeg",
+          "Cache-Control": "public, max-age=604800",
+        },
+      });
+    }
 
     // GET → 채팅 화면 (로그인은 화면 내에서 처리)
     if (request.method === "GET") {

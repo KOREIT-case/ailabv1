@@ -16,4 +16,10 @@ type = "Text"
 globs = ["**/*.html"]
 fallthrough = true
 
+# 배경 이미지(어둡게 가공한 koreit 메인비주얼 4종)를 바이너리로 번들 → /bg/N.jpg 서빙.
+[[rules]]
+type = "Data"
+globs = ["**/*.jpg"]
+fallthrough = true
+
 # DEEPSEEK_KEY 는 시크릿으로만 주입한다 (wrangler secret put). 여기에 평문으로 쓰지 말 것.
