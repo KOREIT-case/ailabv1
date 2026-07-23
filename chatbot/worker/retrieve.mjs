@@ -51,26 +51,32 @@ function countOccurrences(hay, needle) {
  * @param {Array} index  build-index.mjs가 만든 청크 배열
  * @param {string} question
  * @param {number} k  상위 몇 개
+ * @param {string[]|null} allowedTypes  허용 자료유형 필터(예: ["법령","행정규칙"]). null이면 전체.
  * @returns {Array} [{chunk, score, matched}]
  */
-export function retrieve(index, question, k = 5) {
+export function retrieve(index, question, k = 5, allowedTypes = null) {
   const terms = tokenize(question);
   if (!terms.length) return [];
 
-  const N = index.length;
-  const lens = index.map((c) => c.text.length);
+  const pool = allowedTypes
+    ? index.filter((c) => allowedTypes.includes(c.자료유형))
+    : index;
+  if (!pool.length) return [];
+
+  const N = pool.length;
+  const lens = pool.map((c) => c.text.length);
   const avg = lens.reduce((a, b) => a + b, 0) / N || 1;
 
   // 각 term의 df (해당 term을 substring으로 포함한 청크 수)
   const df = {};
   for (const t of terms) {
     let d = 0;
-    for (const c of index) if (c.text.includes(t)) d++;
+    for (const c of pool) if (c.text.includes(t)) d++;
     df[t] = d;
   }
 
   const k1 = 1.5, b = 0.75;
-  const scored = index.map((c, i) => {
+  const scored = pool.map((c, i) => {
     let score = 0;
     const matched = [];
     for (const t of terms) {
@@ -95,8 +101,12 @@ export function retrieve(index, question, k = 5) {
     .slice(0, k);
 }
 
-/** 근거 인용 라벨: "도시 및 주거환경정비법 제64조 (시행 2026-07-01)" */
+/** 근거 인용 라벨. 법령: "…법 제64조 (시행 2026-07-01)" / 판례: "대법원 2005다68769 (선고 …)" */
 export function citation(chunk) {
+  if (chunk.자료유형 === "판례") {
+    const base = `${chunk.법원 || ""} ${chunk.사건번호 || ""}`.trim();
+    return chunk.선고일자 ? `${base} (선고 ${chunk.선고일자})` : base;
+  }
   const base = `${chunk.법령명} ${chunk.조문}`.trim();
   return chunk.시행일자 ? `${base} (시행 ${chunk.시행일자})` : base;
 }

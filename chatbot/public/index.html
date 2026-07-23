@@ -35,6 +35,12 @@
   .bot ul{margin:6px 0;padding-left:20px}
   .bot li{margin:2px 0}
   .notice{align-self:center;font-size:12px;color:var(--dim);text-align:center;max-width:640px}
+  .scopebar{display:flex;gap:16px;align-items:center;padding:9px 18px;
+    background:rgba(23,26,33,.72);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);
+    border-top:1px solid var(--border);font-size:13px;color:var(--dim)}
+  .scopebar label{display:flex;align-items:center;gap:5px;cursor:pointer;user-select:none}
+  .scopebar input{accent-color:var(--accent);width:15px;height:15px;margin:0}
+  .scopebar .hint{margin-left:auto;font-size:11px;color:var(--dim)}
   form#form{display:flex;gap:8px;padding:14px 18px;border-top:1px solid var(--border);
     background:rgba(23,26,33,.72);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px)}
   textarea{flex:1;resize:none;background:var(--bg);color:var(--text);
@@ -95,6 +101,13 @@
     </div>
   </div>
 
+  <div class="scopebar">
+    <span>검색 범위</span>
+    <label><input type="checkbox" id="scLaw" checked /> 법령</label>
+    <label><input type="checkbox" id="scPrec" /> 판례</label>
+    <span class="hint">판례는 변경될 수 있어 기본은 법령만 검색합니다</span>
+  </div>
+
   <form id="form">
     <textarea id="input" placeholder="궁금한 점을 입력하세요 (예: 재건축 매도청구 요건이 어떻게 되나요?)"></textarea>
     <button id="send" type="submit">전송</button>
@@ -106,6 +119,12 @@
 
   const $ = (id) => document.getElementById(id);
   const chat = $("chat"), form = $("form"), input = $("input"), send = $("send");
+  function currentScope(){
+    const law = $("scLaw").checked, prec = $("scPrec").checked;
+    if (law && prec) return "both";
+    if (prec && !law) return "prec";
+    return "law"; // 기본(법령만) — 둘 다 해제 시에도 법령
+  }
   const loginEl = $("login"), loginName = $("loginName"), loginPw = $("loginPw"),
         loginBtn = $("loginBtn"), loginErr = $("loginErr");
   const history = [];
@@ -211,10 +230,9 @@
     return el;
   }
   function fmt(m){
-    if(m.자료유형==="법령") return `${m.법령명||""} ${m.조문||""}`.trim();
-    if(m.자료유형==="판례") return `판례 ${m.사건번호||""}`;
+    if(m.자료유형==="판례") return `${m.법령명||("판례 "+(m.사건번호||""))}`.trim();
     if(m.자료유형==="유권해석") return `유권해석 ${m.문서번호||""}`;
-    return "자료";
+    return `${m.법령명||""} ${m.조문||""}`.trim(); // 법령·행정규칙(고시)
   }
 
   form.addEventListener("submit", async (e) => {
@@ -229,7 +247,7 @@
       const res = await fetch(API + "/", {
         method:"POST", headers:{"Content-Type":"application/json"},
         credentials:"same-origin",
-        body: JSON.stringify({ question:q, history })
+        body: JSON.stringify({ question:q, history, scope: currentScope() })
       });
       if(res.status === 401){
         thinking.remove();

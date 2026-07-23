@@ -135,11 +135,19 @@ export default {
     if (!env.DEEPSEEK_KEY) return json({ error: "서버에 DEEPSEEK_KEY 미설정" }, 500);
 
     try {
-      const { question, history = [] } = await request.json();
+      const { question, history = [], scope = "law" } = await request.json();
       if (!question || !question.trim()) return json({ error: "질문이 비어 있습니다" }, 400);
 
+      // 검색 범위: 법령(법+고시) / 판례 / 둘다. 기본값은 법령만.
+      const SCOPE = {
+        law: ["법령", "행정규칙"],
+        prec: ["판례"],
+        both: ["법령", "행정규칙", "판례"],
+      };
+      const allowedTypes = SCOPE[scope] || SCOPE.law;
+
       const index = await loadIndex(env);
-      const { answer: text, sources } = await answer(index, question, history, env);
+      const { answer: text, sources } = await answer(index, question, history, env, 5, allowedTypes);
       return json({ answer: text, sources });
     } catch (e) {
       return json({ error: String(e) }, 500);

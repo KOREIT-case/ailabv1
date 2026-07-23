@@ -15,6 +15,7 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const CORPUS_DIRS = [
   join(ROOT, "corpus", "laws"),        // 법령(법·시행령·시행규칙)
   join(ROOT, "corpus", "admin_rules"), // 행정규칙(고시)
+  join(ROOT, "corpus", "precedents"),  // 판례
 ];
 const OUT = join(ROOT, "chatbot", "worker", "corpus-index.json");
 
@@ -42,6 +43,25 @@ function splitChunks(body, meta) {
     }
   };
   const 자료유형 = meta["자료유형"] || "법령";
+
+  // 판례는 조문 구조가 아니라 사건 단위 → 문서 전체를 한 청크로.
+  if (자료유형 === "판례") {
+    const text = body.replace(/^#\s+.*$/m, "").trim(); // 최상단 '# 대법원 …' 제목줄 제거
+    if (!text) return [];
+    return [{
+      자료유형,
+      법령명: meta["법령명"],       // "대법원 2005다68769"
+      사건번호: meta["사건번호"],
+      사건명: meta["사건명"],
+      법원: meta["법원"],
+      선고일자: meta["선고일자"],
+      쟁점: meta["쟁점"] || "",
+      조문: "",
+      heading: `${meta["법원"] || ""} ${meta["사건번호"] || ""} ${meta["사건명"] || ""}`.trim(),
+      text,
+    }];
+  }
+
   for (const line of lines) {
     const artM = line.match(/^##\s+(제\S+)\s*(?:\((.*)\))?\s*$/); // 조문
     const tblM = line.match(/^###\s+\[별표\]\s*(.*)$/); // 별표
