@@ -138,11 +138,11 @@ export default {
       const { question, history = [], scope = "law" } = await request.json();
       if (!question || !question.trim()) return json({ error: "질문이 비어 있습니다" }, 400);
 
-      // 검색 범위: 법령(법+고시) / 판례 / 둘다. 기본값은 법령만.
+      // 검색 범위: 법령(법+고시+조례) / 판례 / 둘다. 기본값은 법령만.
       const SCOPE = {
-        law: ["법령", "행정규칙"],
+        law: ["법령", "행정규칙", "조례"],
         prec: ["판례"],
-        both: ["법령", "행정규칙", "판례"],
+        both: ["법령", "행정규칙", "조례", "판례"],
       };
       const allowedTypes = SCOPE[scope] || SCOPE.law;
 

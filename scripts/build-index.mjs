@@ -15,6 +15,7 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const CORPUS_DIRS = [
   join(ROOT, "corpus", "laws"),        // 법령(법·시행령·시행규칙)
   join(ROOT, "corpus", "admin_rules"), // 행정규칙(고시)
+  join(ROOT, "corpus", "ordinances"),  // 자치법규(서울시 조례·규칙)
   join(ROOT, "corpus", "precedents"),  // 판례
 ];
 const OUT = join(ROOT, "chatbot", "worker", "corpus-index.json");
