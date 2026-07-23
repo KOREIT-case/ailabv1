@@ -182,9 +182,11 @@ export default {
       const index = await loadIndex(env);
       // 하이브리드 검색: 질의 임베딩 + corpus 벡터가 있으면 BM25+벡터 융합, 없으면 어휘검색.
       const [vectors, qv] = await Promise.all([loadVectors(env), embedQuery(env, question)]);
+      // k=7: 핵심 정의 조문이 상위 5 바로 밖(예: 관리처분계획 제74조는 6위)에 놓이는
+      // 경우가 있어 여유를 둔다. 답변 본문이 근거로 삼는 조문이 footer에도 실리도록.
       let hits = (vectors && qv)
-        ? retrieveHybrid(index, vectors, qv, question, 5, allowedTypes)
-        : retrieve(index, question, 5, allowedTypes);
+        ? retrieveHybrid(index, vectors, qv, question, 7, allowedTypes)
+        : retrieve(index, question, 7, allowedTypes);
       // 참조 조문 추적 — "제N조에 따른/준용" 등 위임 참조를 따라가 정답 완성도↑ (판례 스코프 제외)
       // 검색결과 전체를 스캔(핵심 조문이 상위 밖일 수 있음), 최대 8개 참조 추가.
       if (scope !== "prec") hits = expandReferences(hits, index, allowedTypes, 3, hits.length);

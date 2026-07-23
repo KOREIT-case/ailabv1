@@ -36,12 +36,23 @@ const ABBR = {
   "lh": "한국토지주택공사 토지주택공사", "sh": "서울주택도시공사",
 };
 
+// 정비 실무 복합어 → 법령 본문 표현으로 분해. 사용자는 "관리처분인가"처럼 붙여 쓰지만
+// 법령은 "관리처분계획의 인가"라 한 덩어리 토큰으로는 매칭이 안 된다. 구성어로 쪼개
+// 실제 조문("관리처분계획의 인가 등" 제74조)이 검색되게 한다.
+const SYN = {
+  "관리처분인가": "관리처분계획 인가", "관리처분계획인가": "관리처분계획 인가",
+  "사업시행인가": "사업시행계획 인가", "사업시행계획인가": "사업시행계획 인가",
+  "조합설립인가": "조합설립 인가", "정비구역지정": "정비구역 지정",
+  "정비계획수립": "정비계획 수립", "분양신청": "분양 신청",
+  "선결조건": "선결 조건", "인가요건": "인가 요건", "동의요건": "동의 요건",
+};
+
 /** 질문 → 키워드(스템) 집합 */
 export function tokenize(q) {
   const raw = (norm(q).match(/[가-힣]+|[A-Za-z0-9]+/g) || []).filter((t) => t.length >= 2);
-  // 약어 확장 토큰 추가
+  // 약어·복합어 확장 토큰 추가 (ABBR: 약어→정식명, SYN: 복합어→구성어)
   for (const w of raw.concat(norm(q).toLowerCase().match(/[a-z]+/g) || [])) {
-    const ex = ABBR[w.toLowerCase()];
+    const ex = ABBR[w.toLowerCase()] || SYN[w];
     if (ex) for (const e of ex.split(" ")) raw.push(e);
   }
   const out = new Set();
@@ -198,10 +209,13 @@ export function expandReferences(hits, index, allowedTypes = null, maxAdd = 4, f
     for (const m of t.matchAll(/제(\d+)조(?:의(\d+))?/g)) {
       // 타법 참조("「○○법」 제N조")는 스킵(제N조 앞 6자에 닫는 」).
       if (t.slice(Math.max(0, m.index - 6), m.index).includes("」")) continue;
-      // ★위임/준용 참조만 따라간다 — 참조 뒤 40자 내에 "이상/준용/예에 따라/요건에 따라"가 있어야 함.
-      // (단순 인용 "제35조제3항에 따른 …자" 등은 답의 조작적 근거가 아니므로 제외해 노이즈 방지)
+      // ★위임/준용/근거 참조만 따라간다 — 참조 뒤 40자 내에 아래 신호가 있어야 함.
+      //  · 위임·준용: "이상/준용/예에 따라/요건에 따라/에 준하여"
+      //  · 근거계획 지정: "에 따라 인가/수립/결정된 …계획" — 그 계획을 정의하는 조문이 실체적 근거
+      //    (예: 제79조가 "제74조에 따라 인가받은 관리처분계획"을 말하면 제74조가 핵심 근거)
+      // (단순 인용 "제35조제3항에 따른 …자" 등은 조작적 근거가 아니므로 제외해 노이즈 방지)
       const after = t.slice(m.index, m.index + 40);
-      if (!/이상|준용|예에 따라|요건에 따라|요건 이상|에 준하여/.test(after)) continue;
+      if (!/이상|준용|예에 따라|요건에 따라|요건 이상|에 준하여|에 따라 인가|에 따라 수립|에 따라 결정|에 따른 인가/.test(after)) continue;
       const label = "제" + m[1] + "조" + (m[2] ? "의" + m[2] : "");
       if (seen.has(label)) continue;
       seen.add(label);
