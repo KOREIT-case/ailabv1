@@ -64,7 +64,7 @@ function splitChunks(body, meta) {
   }
 
   for (const line of lines) {
-    const artM = line.match(/^##\s+(제\S+)\s*(?:\((.*)\))?\s*$/); // 조문
+    const artM = line.match(/^##\s+(제\d+조(?:의\d+)?)\s*(?:\((.*)\))?\s*$/); // 조문
     const tblM = line.match(/^###\s+\[별표\]\s*(.*)$/); // 별표
     if (artM) {
       push();
@@ -93,7 +93,37 @@ function splitChunks(body, meta) {
     }
   }
   push();
-  return chunks;
+
+  // 정의 조문(조문제목에 '정의')은 호(號) 단위로도 서브청크를 만든다.
+  // → "가로주택정비사업이 뭐야?" 처럼 특정 용어 정의를 콕 집어 검색되게.
+  const subs = [];
+  for (const c of chunks) {
+    if (!(c.제목 && /정의/.test(c.제목))) continue;
+    const bodyLines = c.text.split("\n").slice(1); // 헤딩 제외
+    let buf = null;
+    const flush = () => {
+      if (buf && buf.text.trim()) {
+        subs.push({
+          자료유형: c.자료유형,
+          법령명: c.법령명,
+          시행일자: c.시행일자,
+          조문: `${c.조문} ${buf.no}`,
+          제목: c.제목,
+          heading: `${c.heading} ${buf.no}`,
+          text: `${c.heading} ${buf.no}\n${buf.text.trim()}`,
+        });
+      }
+    };
+    for (const ln of bodyLines) {
+      const hoM = ln.match(/^\s*(\d+(?:의\d+)?)\.\s/);  // 호: "1." "1의2."
+      const mokM = ln.match(/^\s*([가-힣])\.\s/);        // 목: "가." "나."
+      if (hoM) { flush(); buf = { no: `제${hoM[1]}호`, text: ln + "\n" }; }
+      else if (mokM) { flush(); buf = { no: `${mokM[1]}목`, text: ln + "\n" }; }
+      else if (buf) buf.text += ln + "\n";
+    }
+    flush();
+  }
+  return chunks.concat(subs);
 }
 
 const index = [];

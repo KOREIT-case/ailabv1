@@ -19,9 +19,15 @@ const JOSA = [
   "인가요", "인가", "입니까", "인지", "나요", "가요", "요",
 ];
 
+// 법령 용어의 가운뎃점(ㆍ·・) 제거 정규화. "노후ㆍ불량건축물"↔"노후불량건축물",
+// "시ㆍ도지사"↔"시도지사", "시장ㆍ군수"↔"시장군수" 를 같게 매칭시킨다.
+export function norm(s) {
+  return (s || "").replace(/[ㆍ·・]/g, "");
+}
+
 /** 질문 → 키워드(스템) 집합 */
 export function tokenize(q) {
-  const raw = (q.match(/[가-힣]+|[A-Za-z0-9]+/g) || []).filter((t) => t.length >= 2);
+  const raw = (norm(q).match(/[가-힣]+|[A-Za-z0-9]+/g) || []).filter((t) => t.length >= 2);
   const out = new Set();
   for (const t of raw) {
     out.add(t);
@@ -63,34 +69,47 @@ export function retrieve(index, question, k = 5, allowedTypes = null) {
     : index;
   if (!pool.length) return [];
 
+  const defIntent = /뭐|무엇|무슨|정의|이란|개념|뜻/.test(question); // 정의 질의 여부
+  // 매칭용 정규화 텍스트를 청크에 캐시(모듈 스코프 index 재사용 시 1회만 계산).
+  for (const c of pool) if (c.__n === undefined) { c.__n = norm(c.text); c.__h = norm(c.heading || ""); }
+
   const N = pool.length;
-  const lens = pool.map((c) => c.text.length);
+  const lens = pool.map((c) => c.__n.length);
   const avg = lens.reduce((a, b) => a + b, 0) / N || 1;
 
   // 각 term의 df (해당 term을 substring으로 포함한 청크 수)
   const df = {};
   for (const t of terms) {
     let d = 0;
-    for (const c of pool) if (c.text.includes(t)) d++;
+    for (const c of pool) if (c.__n.includes(t)) d++;
     df[t] = d;
   }
 
-  const k1 = 1.5, b = 0.75;
+  // b(길이 정규화)를 0.55로 완화 → 정의 조문 등 긴 본조가 과도하게 밀리지 않도록.
+  const k1 = 1.5, b = 0.55;
   const scored = pool.map((c, i) => {
     let score = 0;
     const matched = [];
     for (const t of terms) {
       const d = df[t];
       if (!d) continue; // corpus 어디에도 없는 term은 스킵
-      const tf = countOccurrences(c.text, t);
+      const tf = countOccurrences(c.__n, t);
       if (!tf) continue;
       const idf = Math.log(1 + (N - d + 0.5) / (d + 0.5));
-      const norm = tf * (k1 + 1) / (tf + k1 * (1 - b + b * (lens[i] / avg)));
-      let s = idf * norm;
+      const bm = tf * (k1 + 1) / (tf + k1 * (1 - b + b * (lens[i] / avg)));
+      let s = idf * bm;
       // 조문 제목/헤딩에 등장하면 가중 (핵심 조문일 확률↑)
-      if (c.heading && c.heading.includes(t)) s += idf * 1.5;
+      if (c.__h && c.__h.includes(t)) s += idf * 2;
       score += s;
       matched.push(t);
+    }
+    // 별표(서식·표)는 참고자료로, 본조문보다 낮춤 → 서식 노이즈가 조문을 밀어내지 않게.
+    if (typeof c.조문 === "string" && c.조문.startsWith("[별표]")) score *= 0.6;
+    // 정의 조문 가중. 특히 호/목 단위 정의 서브청크(용어 하나만 담김)는 tf가 낮아
+    // 밀리므로 더 강하게. "뭐야/이란/정의" 같은 정의 질의면 훨씬 강하게 우선.
+    if (score > 0 && c.제목 && /정의/.test(c.제목)) {
+      const isSub = typeof c.조문 === "string" && /(호|목)$/.test(c.조문);
+      score *= defIntent ? (isSub ? 3 : 1.6) : (isSub ? 1.5 : 1.15);
     }
     return { chunk: c, score, matched };
   });
