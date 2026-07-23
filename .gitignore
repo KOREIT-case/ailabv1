@@ -19,3 +19,6 @@ index/vectors/
 Thumbs.db
 .vscode/
 .idea/
+
+# corpus 검색 인덱스 (build-index.mjs로 재생성 → KV 업로드. 번들/커밋 불필요)
+chatbot/worker/corpus-index.json

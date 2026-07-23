@@ -10,9 +10,17 @@
  *   3) wrangler secret put SITE_PASSWORD     → 접속 비밀번호 (예: koreit)
  *   4) wrangler deploy
  */
-import index from "./corpus-index.json";
 import { answer } from "./pipeline.mjs";
 import CHAT_HTML from "../public/index.html"; // 채팅 화면 (wrangler Text 룰로 문자열 번들)
+
+// corpus 검색 인덱스는 KV(CORPUS)에 저장. 콜드스타트에 1회 읽어 모듈 스코프에 캐시.
+let INDEX = null;
+async function getIndex(env) {
+  if (INDEX) return INDEX;
+  INDEX = await env.CORPUS.get("corpus-index", "json");
+  if (!INDEX) throw new Error("KV에 corpus-index 없음 (kv key put 필요)");
+  return INDEX;
+}
 import bg1 from "./bg/bg1.jpg"; // 배경 이미지 4종 (Data 룰 → ArrayBuffer)
 import bg2 from "./bg/bg2.jpg";
 import bg3 from "./bg/bg3.jpg";
@@ -117,6 +125,7 @@ export default {
       const { question, history = [] } = await request.json();
       if (!question || !question.trim()) return json({ error: "질문이 비어 있습니다" }, 400);
 
+      const index = await getIndex(env);
       const { answer: text, sources } = await answer(index, question, history, env);
       return json({ answer: text, sources });
     } catch (e) {

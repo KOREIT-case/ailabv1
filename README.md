@@ -65,10 +65,15 @@ ailabv1/
 🟢 **동작 확인 단계** — 도시정비법 3종(법·시행령·시행규칙) 원문이 `corpus/laws/`에
 들어갔고, 검색→DeepSeek 생성 파이프라인이 종단 테스트를 통과했다.
 
-- 완료: 도시정비법 3종 corpus, 어휘검색(BM25-lite), Worker 구현(`worker.js`),
-  프론트(`index.html`), 환각 방지 검증(범위 밖 질문 거절 확인).
-- 다음: 판례·유권해석 추가, 벡터검색 전환(자료 대량화 시), Cloudflare 배포,
-  개정 감지 스크립트.
+- 완료: 도시정비 관련 법령·고시 corpus(도정법·노후계획도시법·소규모주택법·수도권정비법·
+  세금법 다수 + 고시 3종), 어휘검색(BM25-lite), Worker 구현·**Cloudflare 배포**,
+  로그인 게이트(공용 비밀번호), 랜덤 배경, 마크다운 렌더링, 환각 방지 검증.
+- corpus 검색 인덱스는 번들 크기 한도(무료 1MB)를 피해 **Cloudflare KV**에 저장
+  (`build-index.mjs` 생성 → `wrangler kv key put` 업로드). 번들엔 코드·화면·이미지만.
+- 다음: 판례·유권해석 추가, 벡터검색 전환(bge-m3+Vectorize), 개정 감지 스크립트,
+  검색 개선(별표 가중치 조정 등).
+
+접속: https://dosijeongbi-chatbot.explozn87.workers.dev (비밀번호 필요)
 
 ### 로컬에서 돌려보기
 ```bash
