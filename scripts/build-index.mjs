@@ -12,7 +12,10 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
-const LAWS_DIR = join(ROOT, "corpus", "laws");
+const CORPUS_DIRS = [
+  join(ROOT, "corpus", "laws"),        // 법령(법·시행령·시행규칙)
+  join(ROOT, "corpus", "admin_rules"), // 행정규칙(고시)
+];
 const OUT = join(ROOT, "chatbot", "worker", "corpus-index.json");
 
 /** 아주 단순한 front matter 파서 (key: value 라인만) */
@@ -38,13 +41,14 @@ function splitChunks(body, meta) {
       chunks.push(cur);
     }
   };
+  const 자료유형 = meta["자료유형"] || "법령";
   for (const line of lines) {
     const artM = line.match(/^##\s+(제\S+)\s*(?:\((.*)\))?\s*$/); // 조문
     const tblM = line.match(/^###\s+\[별표\]\s*(.*)$/); // 별표
     if (artM) {
       push();
       cur = {
-        자료유형: "법령",
+        자료유형,
         법령명: meta["법령명"],
         시행일자: meta["시행일자"],
         조문: artM[1],
@@ -55,7 +59,7 @@ function splitChunks(body, meta) {
     } else if (tblM) {
       push();
       cur = {
-        자료유형: "법령",
+        자료유형,
         법령명: meta["법령명"],
         시행일자: meta["시행일자"],
         조문: `[별표] ${tblM[1]}`.trim(),
@@ -71,18 +75,22 @@ function splitChunks(body, meta) {
   return chunks;
 }
 
-const files = readdirSync(LAWS_DIR).filter(
-  (f) => f.endsWith(".md") && !f.startsWith("_")
-);
-
 const index = [];
 let id = 0;
-for (const f of files) {
-  const md = readFileSync(join(LAWS_DIR, f), "utf-8");
-  const { meta, body } = parseFrontMatter(md);
-  const chunks = splitChunks(body, meta);
-  for (const c of chunks) index.push({ id: id++, 파일: f, ...c });
-  console.log(`  ${f}: ${chunks.length} 청크 (${meta["법령명"]})`);
+for (const dir of CORPUS_DIRS) {
+  let files;
+  try {
+    files = readdirSync(dir).filter((f) => f.endsWith(".md") && !f.startsWith("_"));
+  } catch {
+    continue; // 폴더 없으면 건너뜀
+  }
+  for (const f of files) {
+    const md = readFileSync(join(dir, f), "utf-8");
+    const { meta, body } = parseFrontMatter(md);
+    const chunks = splitChunks(body, meta);
+    for (const c of chunks) index.push({ id: id++, 파일: f, ...c });
+    console.log(`  ${f}: ${chunks.length} 청크 (${meta["법령명"]})`);
+  }
 }
 
 writeFileSync(OUT, JSON.stringify(index, null, 0), "utf-8");
