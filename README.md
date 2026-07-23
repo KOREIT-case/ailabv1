@@ -62,5 +62,17 @@ ailabv1/
 
 ## 상태
 
-🚧 **초안 (skeleton)** — 폴더 구조와 작성 규칙, 예시 파일이 들어있는 단계.
-실제 법령 전문·판례·유권해석 데이터와 Worker 구현은 다음 단계에서 채운다.
+🟢 **동작 확인 단계** — 도시정비법 3종(법·시행령·시행규칙) 원문이 `corpus/laws/`에
+들어갔고, 검색→DeepSeek 생성 파이프라인이 종단 테스트를 통과했다.
+
+- 완료: 도시정비법 3종 corpus, 어휘검색(BM25-lite), Worker 구현(`worker.js`),
+  프론트(`index.html`), 환각 방지 검증(범위 밖 질문 거절 확인).
+- 다음: 판례·유권해석 추가, 벡터검색 전환(자료 대량화 시), Cloudflare 배포,
+  개정 감지 스크립트.
+
+### 로컬에서 돌려보기
+```bash
+node scripts/build-index.mjs                              # corpus → 검색 인덱스
+node scripts/test-retrieval.mjs                           # 질문→조문 검색만 확인 (키 불필요)
+DEEPSEEK_KEY=sk-... node scripts/test-answer.mjs "질문"    # 종단(검색+생성) 테스트
+```

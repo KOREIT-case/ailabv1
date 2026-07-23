@@ -67,11 +67,20 @@ Cloudflare Worker. 요청당 다음을 수행:
 
 질의 시: 질문 임베딩 → top-K 조각 추출 → system-prompt와 결합 → DeepSeek 답변.
 
-## 5. 미해결/다음 단계
+## 5. 진행 상황 / 다음 단계
 
-- [ ] 임베딩 모델 선정 (한국어 법률 성능 검증)
-- [ ] 벡터 저장소 기술 선정 (초기 규모 기준)
-- [ ] Worker 실제 구현 (`worker.example.js` → `worker.js`)
-- [ ] 개정 감지 스크립트 구현 (`scripts/`)
-- [ ] 프론트엔드 실제 구현
-- [ ] DeepSeek 한국어 법 해석 정확도 실측 (샘플 질문셋으로 평가)
+- [x] Worker 실제 구현 (`worker.js` + `pipeline.mjs` + `retrieve.mjs`)
+- [x] 프론트엔드 구현 (`chatbot/public/index.html`, Worker 주소만 기입하면 연결)
+- [x] 초기 검색 방식: 어휘검색 BM25-lite (`retrieve.mjs`). corpus가 작은 초기 단계에
+      적합. 종단 테스트로 도정법 질문 정확 검색·답변 확인.
+- [x] DeepSeek 한국어 법 해석 정확도 1차 실측 (매도청구·조합원자격·결격사유 등 정답,
+      범위 밖 질문은 규칙대로 거절 = 환각 방지 확인).
+- [ ] 벡터검색 전환: 판례·유권해석 대량 추가로 어휘검색 한계 시 임베딩+벡터저장소로
+      `retrieve.mjs` 교체 (인터페이스 `retrieve(index, question, k)` 유지).
+- [ ] 개정 감지 스크립트 구현 (`scripts/check-revisions`)
+- [ ] Cloudflare 실제 배포 (`chatbot/worker/wrangler.toml`, `wrangler secret put DEEPSEEK_KEY`)
+
+### 초기 검색을 벡터가 아닌 어휘검색으로 시작한 이유
+corpus가 아직 수백 청크로 작고, 법률 질문은 조문의 법령 용어(매도청구·관리처분계획 등)를
+그대로 포함해 어휘검색 적중률이 높다. 임베딩 API·벡터DB 없이 즉시 배포·테스트 가능하고
+비용이 0이다. 자료가 커지면 `retrieve.mjs`만 벡터검색으로 교체한다(§4 설계 유지).

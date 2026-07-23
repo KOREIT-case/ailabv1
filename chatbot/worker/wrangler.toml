@@ -1,0 +1,12 @@
+# Cloudflare Worker 배포 설정
+# 배포 절차:
+#   1) node scripts/build-index.mjs          # corpus-index.json 생성/갱신
+#   2) cd chatbot/worker
+#   3) npx wrangler secret put DEEPSEEK_KEY   # DeepSeek 키를 시크릿으로 등록 (코드/토ml에 넣지 말 것)
+#   4) npx wrangler deploy
+#   5) 배포 후 나온 *.workers.dev 주소를 chatbot/public/index.html 의 WORKER_URL 에 기입
+name = "dosijeongbi-chatbot"
+main = "worker.js"
+compatibility_date = "2026-07-23"
+
+# DEEPSEEK_KEY 는 시크릿으로만 주입한다 (wrangler secret put). 여기에 평문으로 쓰지 말 것.
