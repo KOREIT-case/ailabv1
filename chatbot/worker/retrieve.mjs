@@ -25,9 +25,25 @@ export function norm(s) {
   return (s || "").replace(/[ㆍ·・]/g, "");
 }
 
+// 실무 약어 → 정식 명칭(확장 토큰). 질의에 약어가 있으면 정식명 토큰도 함께 검색.
+const ABBR = {
+  "도정법": "도시 주거환경정비법", "도시정비법": "도시 주거환경정비법",
+  "빈소법": "빈집 소규모주택 정비 특례법", "소규모주택정비법": "빈집 소규모주택 정비 특례법",
+  "소규모정비법": "빈집 소규모주택 정비 특례법",
+  "노후계획도시특별법": "노후계획도시 정비 지원 특별법", "노후도시특별법": "노후계획도시 정비 지원 특별법",
+  "수도권정비법": "수도권정비계획법",
+  "지특법": "지방세특례제한법", "조특법": "조세특례제한법", "종부세법": "종합부동산세법",
+  "lh": "한국토지주택공사 토지주택공사", "sh": "서울주택도시공사",
+};
+
 /** 질문 → 키워드(스템) 집합 */
 export function tokenize(q) {
   const raw = (norm(q).match(/[가-힣]+|[A-Za-z0-9]+/g) || []).filter((t) => t.length >= 2);
+  // 약어 확장 토큰 추가
+  for (const w of raw.concat(norm(q).toLowerCase().match(/[a-z]+/g) || [])) {
+    const ex = ABBR[w.toLowerCase()];
+    if (ex) for (const e of ex.split(" ")) raw.push(e);
+  }
   const out = new Set();
   for (const t of raw) {
     out.add(t);
@@ -71,7 +87,11 @@ export function retrieve(index, question, k = 5, allowedTypes = null) {
 
   const defIntent = /뭐|무엇|무슨|정의|이란|개념|뜻/.test(question); // 정의 질의 여부
   // 매칭용 정규화 텍스트를 청크에 캐시(모듈 스코프 index 재사용 시 1회만 계산).
-  for (const c of pool) if (c.__n === undefined) { c.__n = norm(c.text); c.__h = norm(c.heading || ""); }
+  // 매칭텍스트에 법령명을 덧붙여 "지방세법 취득세"처럼 법 지정 질의가 그 법으로 향하게.
+  for (const c of pool) if (c.__n === undefined) {
+    c.__n = norm(c.text + " " + (c.법령명 || ""));
+    c.__h = norm((c.heading || "") + " " + (c.법령명 || ""));
+  }
 
   const N = pool.length;
   const lens = pool.map((c) => c.__n.length);
