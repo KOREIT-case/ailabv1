@@ -1,19 +1,19 @@
 # Cloudflare Worker 배포 설정
 # 배포 절차:
 #   1) node scripts/build-index.mjs          # corpus-index.json 생성/갱신
-#   2) cd chatbot/worker
-#   3) npx wrangler kv key put --binding CORPUS corpus-index --path corpus-index.json --remote
-#      (corpus를 KV에 업로드 — 번들 크기 제한 회피, 무료 유지)
+#   2) bash scripts/kv-upload.sh             # corpus-index.json → KV(CORPUS_KV) 업로드
+#   3) cd chatbot/worker
 #   4) npx wrangler secret put DEEPSEEK_KEY   # DeepSeek 키 (코드/toml에 넣지 말 것)
 #   5) npx wrangler secret put SITE_PASSWORD  # 접속 비밀번호
 #   6) npx wrangler deploy
+# corpus만 갱신할 때는 1)→2)만 하면 됨(재배포 불필요, KV만 갱신).
 name = "dosijeongbi-chatbot"
 main = "worker.js"
 compatibility_date = "2026-07-23"
 
 # corpus 검색 인덱스는 번들 대신 KV에 저장(무료 한도 1MB 회피). Worker가 콜드스타트에 1회 로드.
 [[kv_namespaces]]
-binding = "CORPUS"
+binding = "CORPUS_KV"
 id = "dfae6c10495d4a2cae9cd8ca707ff6be"
 
 # 채팅 화면(../public/index.html)을 문자열로 번들에 포함 → GET 시 Worker가 직접 서빙.
