@@ -67,6 +67,10 @@ const SYN = {
   // 현금청산: 법 조문은 "현금으로 청산"(제76조)·"청산금"(제89·90조)이라 쓰고, 대상자는
   // "분양신청을 하지 아니한 자"(제73조)로 규정 → 붙여 쓴 "현금청산"을 관련 법령어로 확장.
   "현금청산": "현금 청산 청산금 분양신청", "현금청산대상자": "현금 청산 청산금 분양신청",
+  // 손실보상 항목(주거이전비·이주정착금·영업보상·지장물)은 토지보상법 소관이나 도정법
+  // 제65조가 이를 준용 → "손실보상/보상" 토큰을 더해 제62·65조로 향하게(정확한 준용 근거 안내).
+  "주거이전비": "주거이전비 손실보상 보상", "이주정착금": "이주정착금 손실보상 보상",
+  "영업보상": "영업보상 손실보상 보상", "지장물": "지장물 손실보상 보상",
 };
 
 // 세법 법령 — 세금 질의가 아닐 때 감점(정비 절차 질의에서 "조합원/대상자/양도" 등
@@ -93,35 +97,33 @@ function domainPenalty(name, taxIntent, nogIntent) {
 
 /** 질문 → 키워드(스템) 집합 */
 export function tokenize(q) {
-  const raw = (norm(q).match(/[가-힣]+|[A-Za-z0-9]+/g) || []).filter((t) => t.length >= 2);
-  // 약어·복합어 확장 (ABBR: 약어→정식명, 원형 유지 / SYN: 구어체→법령어, 원형은 RHS에 없으면 치환)
+  const out = new Set();
+  // 토큰과 그 스템(조사·용언 어미 제거)을 함께 넣는다.
+  const addWithStem = (t) => {
+    out.add(t);
+    if (/[가-힣]/.test(t)) {
+      for (const j of JOSA) {
+        if (t.length > j.length + 1 && t.endsWith(j)) { out.add(t.slice(0, -j.length)); break; }
+      }
+    }
+  };
+  const base = (norm(q).match(/[가-힣]+|[A-Za-z0-9]+/g) || []).filter((t) => t.length >= 2);
+  for (const t of base) addWithStem(t);
+
+  // 약어·복합어 확장 — 원형뿐 아니라 스템("이주정착금은"→"이주정착금")에도 적용해야
+  // 조사 붙은 질의어도 SYN에 걸린다. (ABBR: 약어→정식명, 원형 유지 / SYN: 구어체→법령어 치환)
   const drop = new Set();
-  for (const w of raw.concat(norm(q).toLowerCase().match(/[a-z]+/g) || [])) {
+  for (const w of [...out, ...(norm(q).toLowerCase().match(/[a-z]+/g) || [])]) {
     const ab = ABBR[w.toLowerCase()];
-    if (ab) for (const e of ab.split(" ")) raw.push(e);
+    if (ab) for (const e of ab.split(" ")) addWithStem(e);
     const sy = SYN[w];
     if (sy) {
       const parts = sy.split(" ");
-      for (const e of parts) raw.push(e);
+      for (const e of parts) addWithStem(e);
       if (!parts.includes(w)) drop.add(w); // 구어체 원형은 오매칭 유발 → 검색어에서 제외
     }
   }
-  const out = new Set();
-  for (const t of raw) {
-    if (drop.has(t)) continue;
-    out.add(t);
-    // 한글 토큰은 끝의 조사/어미를 벗겨 스템도 후보에 추가
-    if (/[가-힣]/.test(t)) {
-      for (const j of JOSA) {
-        if (t.length > j.length + 1 && t.endsWith(j)) {
-          out.add(t.slice(0, -j.length));
-          break;
-        }
-      }
-    }
-  }
-  // 너무 짧은(1글자) 스템 제거
-  return [...out].filter((t) => t.length >= 2);
+  return [...out].filter((t) => t.length >= 2 && !drop.has(t));
 }
 
 function countOccurrences(hay, needle) {
