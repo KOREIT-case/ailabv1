@@ -11,12 +11,21 @@
  *     (worker.js 인터페이스 retrieve(index, question, k)는 유지)
  */
 
-// 질문 끝에 흔히 붙는 조사·어미 (스템 추출용)
+// 질문 끝에 흔히 붙는 조사·어미 (스템 추출용). 명사에 붙는 조사 + 용언(하다/되다) 어미.
+// 실무 질문은 "해임하려면·해제되면·받아야·상실되는"처럼 동사형으로 끝나는 경우가 많아,
+// 조사만 벗기면 핵심 명사(해임·해제·상실)가 검색어에서 빠진다. 용언 어미도 함께 벗긴다.
 const JOSA = [
+  // 조사
   "으로써", "에서의", "에서", "으로", "라는", "이라는", "이란", "란",
   "은", "는", "이", "가", "을", "를", "의", "에", "와", "과", "도",
   "만", "나", "로", "께", "부터", "까지", "마다", "보다", "처럼",
   "인가요", "인가", "입니까", "인지", "나요", "가요", "요",
+  // 용언 어미(하다/되다/받다 등) — "해임하려면"→"해임", "해제되면"→"해제"
+  "하려면", "하려는", "으려면", "려면", "하나요", "되나요", "하는", "되는",
+  "하면", "되면", "해야", "되어야", "하기", "되기", "하고", "되고", "하여", "되어",
+  "하도록", "되도록", "합니다", "됩니다", "했", "됐", "하는가", "되는가",
+  "받으려면", "받아야", "받는", "가능해", "가능한가", "가능", "되면은",
+  "된", "될", "됨", "돼", "함", "할",
 ];
 
 // 법령 용어의 가운뎃점(ㆍ·・) 제거 정규화. "노후ㆍ불량건축물"↔"노후불량건축물",
@@ -55,7 +64,32 @@ const SYN = {
   "정비구역지정": "정비구역 지정",
   "시공사": "시공자", "시행사": "시행자", "설계사": "설계자",
   "도시정비사업": "정비사업",
+  // 현금청산: 법 조문은 "현금으로 청산"(제76조)·"청산금"(제89·90조)이라 쓰고, 대상자는
+  // "분양신청을 하지 아니한 자"(제73조)로 규정 → 붙여 쓴 "현금청산"을 관련 법령어로 확장.
+  "현금청산": "현금 청산 청산금 분양신청", "현금청산대상자": "현금 청산 청산금 분양신청",
 };
+
+// 세법 법령 — 세금 질의가 아닐 때 감점(정비 절차 질의에서 "조합원/대상자/양도" 등
+// 흔한 단어가 세법의 무관 조문(영농조합법인 조합원 과세 등)을 상위로 끌어올리는 것 차단).
+const TAX_LAW = /^(지방세법|지방세특례제한법|지방세기본법|조세특례제한법|소득세법|종합부동산세법|농어촌특별세법)/;
+// 세금 의도 신호. "세입자/세대" 오검출을 피하려 단독 "세"는 쓰지 않는다.
+const TAX_INTENT = /취득세|재산세|양도소득|종합부동산|종부세|지방세|과세|비과세|세액|세율|세금|납세|감면|추징|부담금|등록면허세|과세표준/;
+
+// 노후계획도시 특별법은 1기 신도시 등 특정 대상 법이라, 일반 정비사업 질의에서
+// "정비사업/시행자/구역지정" 같은 단어로 상위를 차지해 도정법 본법을 밀어낸다.
+// 질의에 노후계획도시 신호가 없으면 감점.
+const NOG_LAW = /^노후계획도시/;
+const NOG_INTENT = /노후계획도시|노후도시|노계|특별정비|재정비촉진|1기\s*신도시|신도시/;
+
+// 주변 법령 감점 배수. 세법·노후계획도시법은 해당 의도가 없으면 감점해 도정법 본법을 우선.
+// 어휘(retrieve)·하이브리드(retrieveHybrid) 양쪽 최종 점수에 동일 적용(벡터 rerank가 감점을
+// 무시하고 세법 조문을 끌어올리는 것 방지).
+function domainPenalty(name, taxIntent, nogIntent) {
+  let p = 1;
+  if (!taxIntent && TAX_LAW.test(name || "")) p *= 0.35;
+  if (!nogIntent && NOG_LAW.test(name || "")) p *= 0.5;
+  return p;
+}
 
 /** 질문 → 키워드(스템) 집합 */
 export function tokenize(q) {
@@ -115,6 +149,8 @@ export function retrieve(index, question, k = 5, allowedTypes = null) {
   if (!pool.length) return [];
 
   const defIntent = /뭐|무엇|무슨|정의|이란|개념|뜻/.test(question); // 정의 질의 여부
+  const taxIntent = TAX_INTENT.test(question); // 세금 질의 여부(아니면 세법 청크 감점)
+  const nogIntent = NOG_INTENT.test(question); // 노후계획도시 질의 여부(아니면 노후법 감점)
   // 매칭용 정규화 텍스트를 청크에 캐시(모듈 스코프 index 재사용 시 1회만 계산).
   // 매칭텍스트에 법령명을 덧붙여 "지방세법 취득세"처럼 법 지정 질의가 그 법으로 향하게.
   for (const c of pool) if (c.__n === undefined) {
@@ -152,6 +188,8 @@ export function retrieve(index, question, k = 5, allowedTypes = null) {
       score += s;
       matched.push(t);
     }
+    // 세법·노후계획도시법은 해당 의도가 아니면 감점(무관 조문이 상위 차지 방지).
+    score *= domainPenalty(c.법령명, taxIntent, nogIntent);
     // 별표(서식·표)는 참고자료로, 본조문보다 낮춤 → 서식 노이즈가 조문을 밀어내지 않게.
     if (typeof c.조문 === "string" && c.조문.startsWith("[별표]")) score *= 0.6;
     // 정의 조문 가중. 특히 호/목 단위 정의 서브청크(용어 하나만 담김)는 tf가 낮아
@@ -193,12 +231,17 @@ export function retrieveHybrid(index, vectors, queryVec, question, k = 5, allowe
   const vRank = new Map();
   [...withVec].sort((a, b) => b.vec - a.vec).forEach((x, r) => vRank.set(x.chunk.id, r));
 
+  // RRF는 점수가 아닌 "순위"로 융합하므로, retrieve()의 세법/노후 감점이 여기서 무시된다.
+  // → 벡터가 세법 조문(예: 소득세법 양도의 정의)을 끌어올리는 걸 막기 위해 최종 점수에도 감점 적용.
+  const taxIntent = TAX_INTENT.test(question);
+  const nogIntent = NOG_INTENT.test(question);
   // RRF 융합(어휘 순위 + 벡터 순위). 어휘 후보 안에서 의미까지 상위인 것을 끌어올림.
   const RK = 20;
   return withVec
     .map((x) => ({
       chunk: x.chunk,
-      score: 1 / (RK + x.bmRank) + 1 / (RK + vRank.get(x.chunk.id)),
+      score: (1 / (RK + x.bmRank) + 1 / (RK + vRank.get(x.chunk.id)))
+        * domainPenalty(x.chunk.법령명, taxIntent, nogIntent),
     }))
     .sort((a, b) => b.score - a.score)
     .slice(0, k);
