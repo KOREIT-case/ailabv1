@@ -43,6 +43,9 @@
   .scopebar label{display:flex;align-items:center;gap:5px;cursor:pointer;user-select:none}
   .scopebar input{accent-color:var(--accent);width:15px;height:15px;margin:0}
   .scopebar .hint{margin-left:auto;font-size:11px;color:var(--dim)}
+  .scopebar select{background:rgba(23,26,33,.9);color:var(--fg);border:1px solid var(--border);
+    border-radius:6px;padding:2px 6px;font-size:12px;cursor:pointer}
+  .scopebar select:disabled{opacity:.4;cursor:not-allowed}
   form#form{display:flex;gap:8px;padding:14px 18px;border-top:1px solid var(--border);
     background:rgba(23,26,33,.72);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px)}
   textarea{flex:1;resize:none;background:var(--bg);color:var(--text);
@@ -107,6 +110,17 @@
     <span>검색 범위</span>
     <label><input type="checkbox" id="scLaw" checked /> 법령</label>
     <label><input type="checkbox" id="scPrec" /> 판례</label>
+    <label><input type="checkbox" id="scOrd" /> 조례</label>
+    <select id="scOrdRegion" disabled title="조례를 체크하면 지역을 선택할 수 있습니다">
+      <option value="서울특별시">서울특별시</option>
+      <option value="부산광역시">부산광역시</option>
+      <option value="대구광역시">대구광역시</option>
+      <option value="인천광역시">인천광역시</option>
+      <option value="광주광역시">광주광역시</option>
+      <option value="대전광역시">대전광역시</option>
+      <option value="울산광역시">울산광역시</option>
+      <option value="경기도">경기도</option>
+    </select>
   </div>
 
   <form id="form">
@@ -121,11 +135,18 @@
   const $ = (id) => document.getElementById(id);
   const chat = $("chat"), form = $("form"), input = $("input"), send = $("send");
   function currentScope(){
-    const law = $("scLaw").checked, prec = $("scPrec").checked;
-    if (law && prec) return "both";
-    if (prec && !law) return "prec";
-    return "law"; // 기본(법령만) — 둘 다 해제 시에도 법령
+    // 기본은 법령만. 조례는 체크 + 지역 선택 시에만 해당 지역 조례를 포함한다.
+    const ord = $("scOrd").checked;
+    return {
+      law: $("scLaw").checked,
+      prec: $("scPrec").checked,
+      ordRegion: ord ? $("scOrdRegion").value : null,
+    };
   }
+  // 조례 체크박스에 따라 지역 드롭다운 활성화.
+  $("scOrd").addEventListener("change", () => {
+    $("scOrdRegion").disabled = !$("scOrd").checked;
+  });
   const loginEl = $("login"), loginName = $("loginName"), loginPw = $("loginPw"),
         loginBtn = $("loginBtn"), loginErr = $("loginErr");
   const history = [];

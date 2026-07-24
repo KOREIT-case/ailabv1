@@ -142,15 +142,19 @@ function countOccurrences(hay, needle) {
  * @param {string} question
  * @param {number} k  상위 몇 개
  * @param {string[]|null} allowedTypes  허용 자료유형 필터(예: ["법령","행정규칙"]). null이면 전체.
+ * @param {string|null} region  조례 지역 필터(예: "서울특별시"). 조례는 이 지역만 검색된다.
+ *   region이 없으면 조례는 전량 제외 — 여러 지자체 조례가 뒤섞여 엉뚱한 지역을 인용하는 사고 방지.
  * @returns {Array} [{chunk, score, matched}]
  */
-export function retrieve(index, question, k = 5, allowedTypes = null) {
+export function retrieve(index, question, k = 5, allowedTypes = null, region = null) {
   const terms = tokenize(question);
   if (!terms.length) return [];
 
-  const pool = allowedTypes
+  let pool = allowedTypes
     ? index.filter((c) => allowedTypes.includes(c.자료유형))
     : index;
+  // 조례는 선택된 지역만 남긴다(지역 미지정 시 조례 전량 제외).
+  pool = pool.filter((c) => c.자료유형 !== "조례" || (region && c.지자체 === region));
   if (!pool.length) return [];
 
   const defIntent = /뭐|무엇|무슨|정의|이란|개념|뜻/.test(question); // 정의 질의 여부
@@ -220,11 +224,12 @@ export function retrieve(index, question, k = 5, allowedTypes = null) {
  * @param {string} question
  * @param {number} k
  * @param {string[]|null} allowedTypes
+ * @param {string|null} region  조례 지역 필터(retrieve로 전달)
  */
-export function retrieveHybrid(index, vectors, queryVec, question, k = 5, allowedTypes = null, dim = 1024) {
+export function retrieveHybrid(index, vectors, queryVec, question, k = 5, allowedTypes = null, dim = 1024, region = null) {
   // 어휘(BM25)로 후보군(top-20)을 뽑고, 그 후보 "안에서만" 벡터로 재순위한다.
   // → 의미 검색이 관련 낮은 새 청크를 끌어와 정밀도를 떨어뜨리는 것을 방지(안전한 rerank).
-  const bm = retrieve(index, question, 20, allowedTypes);
+  const bm = retrieve(index, question, 20, allowedTypes, region);
   if (bm.length <= 1) return bm.slice(0, k);
 
   const withVec = bm.map((h, bmRank) => {

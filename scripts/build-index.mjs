@@ -74,6 +74,7 @@ function splitChunks(body, meta) {
       cur = {
         자료유형,
         법령명: meta["법령명"],
+        지자체: meta["지자체"],   // 조례만 값 존재(지역 필터용). 법령·판례는 undefined.
         시행일자: meta["시행일자"],
         조문: artM[1],
         제목: artM[2] || "",
@@ -85,6 +86,7 @@ function splitChunks(body, meta) {
       cur = {
         자료유형,
         법령명: meta["법령명"],
+        지자체: meta["지자체"],   // 조례만 값 존재(지역 필터용). 법령·판례는 undefined.
         시행일자: meta["시행일자"],
         조문: `[별표] ${tblM[1]}`.trim(),
         제목: tblM[1] || "",
@@ -96,6 +98,7 @@ function splitChunks(body, meta) {
       cur = {
         자료유형,
         법령명: meta["법령명"],
+        지자체: meta["지자체"],   // 조례만 값 존재(지역 필터용). 법령·판례는 undefined.
         시행일자: meta["시행일자"],
         조문: genM[1].trim(),
         제목: "",
@@ -120,6 +123,7 @@ function splitChunks(body, meta) {
         subs.push({
           자료유형: c.자료유형,
           법령명: c.법령명,
+          지자체: c.지자체,
           시행일자: c.시행일자,
           조문: `${c.조문} ${buf.no}`,
           제목: c.제목,

@@ -168,16 +168,30 @@ export default {
     if (!env.DEEPSEEK_KEY) return json({ error: "서버에 DEEPSEEK_KEY 미설정" }, 500);
 
     try {
-      const { question, history = [], scope = "law" } = await request.json();
+      const { question, history = [], scope = {} } = await request.json();
       if (!question || !question.trim()) return json({ error: "질문이 비어 있습니다" }, 400);
 
-      // 검색 범위: 법령(법+고시+조례) / 판례 / 둘다. 기본값은 법령만.
-      const SCOPE = {
-        law: ["법령", "행정규칙", "조례"],
-        prec: ["판례"],
-        both: ["법령", "행정규칙", "조례", "판례"],
-      };
-      const allowedTypes = SCOPE[scope] || SCOPE.law;
+      // 검색 범위. scope = { law, prec, ordRegion } 객체.
+      //  · 기본은 법령(+행정규칙)만. 판례는 opt-in. 조례는 "지역을 고른 경우에만" 포함.
+      //  · 조례는 지자체마다 문구가 비슷해, 지역을 지정하지 않으면 검색에서 제외한다
+      //    (여러 지자체 조례가 뒤섞여 엉뚱한 지역을 인용하는 사고를 원천 차단).
+      //  · 구버전 문자열 scope("law"/"prec"/"both")도 하위호환 처리.
+      let law, prec, ordRegion;
+      if (typeof scope === "string") {
+        law = scope === "law" || scope === "both";
+        prec = scope === "prec" || scope === "both";
+        ordRegion = null;
+      } else {
+        law = scope.law !== false; // 미지정 시 켜짐
+        prec = !!scope.prec;
+        ordRegion = scope.ordRegion || null;
+      }
+      const allowedTypes = [];
+      if (law) allowedTypes.push("법령", "행정규칙");
+      if (prec) allowedTypes.push("판례");
+      if (ordRegion) allowedTypes.push("조례");
+      if (!allowedTypes.length) allowedTypes.push("법령", "행정규칙"); // 안전 기본
+      const region = ordRegion;
 
       const index = await loadIndex(env);
       // 하이브리드 검색: 질의 임베딩 + corpus 벡터가 있으면 BM25+벡터 융합, 없으면 어휘검색.
@@ -185,11 +199,11 @@ export default {
       // k=7: 핵심 정의 조문이 상위 5 바로 밖(예: 관리처분계획 제74조는 6위)에 놓이는
       // 경우가 있어 여유를 둔다. 답변 본문이 근거로 삼는 조문이 footer에도 실리도록.
       let hits = (vectors && qv)
-        ? retrieveHybrid(index, vectors, qv, question, 7, allowedTypes)
-        : retrieve(index, question, 7, allowedTypes);
-      // 참조 조문 추적 — "제N조에 따른/준용" 등 위임 참조를 따라가 정답 완성도↑ (판례 스코프 제외)
+        ? retrieveHybrid(index, vectors, qv, question, 7, allowedTypes, 1024, region)
+        : retrieve(index, question, 7, allowedTypes, region);
+      // 참조 조문 추적 — "제N조에 따른/준용" 등 위임 참조를 따라가 정답 완성도↑ (판례 전용이면 생략)
       // 검색결과 전체를 스캔(핵심 조문이 상위 밖일 수 있음), 최대 8개 참조 추가.
-      if (scope !== "prec") hits = expandReferences(hits, index, allowedTypes, 3, hits.length);
+      if (law || ordRegion) hits = expandReferences(hits, index, allowedTypes, 3, hits.length);
       const { answer: text, sources } = await generate(question, history, env, hits);
       return json({ answer: text, sources });
     } catch (e) {
