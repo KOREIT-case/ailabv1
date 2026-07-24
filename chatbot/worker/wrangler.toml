@@ -7,7 +7,7 @@
 #   5) npx wrangler secret put SITE_PASSWORD  # 접속 비밀번호
 #   6) npx wrangler deploy
 # corpus만 갱신할 때는 1)→2)만 하면 됨(재배포 불필요, KV만 갱신).
-name = "dosijeongbi-chatbot"
+name = "jeongbi"
 main = "worker.js"
 compatibility_date = "2026-07-23"
 

@@ -78,7 +78,7 @@ Cloudflare Worker. 요청당 다음을 수행:
 - [ ] 벡터검색 전환(스택 확정, 구현 보류): 아래 §6 결정대로 bge-m3 + Vectorize
       하이브리드. 판례·유권해석 추가로 어휘검색 한계가 실제로 드러날 때 구현.
       `retrieve.mjs` 인터페이스(`retrieve(index, question, k)`)는 유지.
-- [x] Cloudflare 배포 완료: https://dosijeongbi-chatbot.explozn87.workers.dev
+- [x] Cloudflare 배포 완료: https://jeongbi.explozn87.workers.dev
       (같은 URL이 GET=채팅화면·POST=API 겸함). 접근제한: 공용 비밀번호 로그인
       (`SITE_PASSWORD` 시크릿) + HttpOnly 세션 쿠키. 마크다운 렌더링 적용.
 - [ ] 개정 감지 스크립트 구현 (`scripts/check-revisions`)

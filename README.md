@@ -73,7 +73,7 @@ ailabv1/
 - 다음: 판례·유권해석 추가, 벡터검색 전환(bge-m3+Vectorize), 개정 감지 스크립트,
   검색 개선(별표 가중치 조정 등).
 
-접속: https://dosijeongbi-chatbot.explozn87.workers.dev (비밀번호 필요)
+접속: https://jeongbi.explozn87.workers.dev (비밀번호 필요)
 
 ### 로컬에서 돌려보기
 ```bash
