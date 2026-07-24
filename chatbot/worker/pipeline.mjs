@@ -70,6 +70,7 @@ function toSources(hits) {
   return hits.map((h) => ({
     자료유형: h.chunk.자료유형,
     법령명: h.chunk.법령명,
+    지자체: h.chunk.지자체,   // 조례만 값 존재(근거 표시·지역 확인용)
     조문: h.chunk.조문,
     시행일자: h.chunk.시행일자,
     사건번호: h.chunk.사건번호,
