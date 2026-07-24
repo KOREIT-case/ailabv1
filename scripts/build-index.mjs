@@ -66,6 +66,9 @@ function splitChunks(body, meta) {
   for (const line of lines) {
     const artM = line.match(/^##\s+(제\d+조(?:의\d+)?)\s*(?:\((.*)\))?\s*$/); // 조문
     const tblM = line.match(/^###\s+\[별표\]\s*(.*)$/); // 별표
+    // 조문(제N조)이 아닌 ## 헤딩(예: 고시의 "제1장 총칙", "별표(첨부서식)") — 조문식이 아닌
+    // 행정규칙을 통째로 놓치지 않도록 일반 헤딩도 청크로 만든다. (법령은 전부 제N조라 무영향)
+    const genM = !artM && line.match(/^##\s+(.+?)\s*$/);
     if (artM) {
       push();
       cur = {
@@ -86,6 +89,17 @@ function splitChunks(body, meta) {
         조문: `[별표] ${tblM[1]}`.trim(),
         제목: tblM[1] || "",
         heading: `[별표] ${tblM[1]}`.trim(),
+        text: line + "\n",
+      };
+    } else if (genM) {
+      push();
+      cur = {
+        자료유형,
+        법령명: meta["법령명"],
+        시행일자: meta["시행일자"],
+        조문: genM[1].trim(),
+        제목: "",
+        heading: genM[1].trim(),
         text: line + "\n",
       };
     } else if (cur) {

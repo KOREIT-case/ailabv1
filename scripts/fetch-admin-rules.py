@@ -11,6 +11,10 @@ RULES = [
     ("2100000235448", "정비사업의임대주택및주택규모별건설비율.md"),
     ("2100000246728", "정비사업공사비검증기준.md"),
     ("2100000262834", "정비사업계약업무처리기준.md"),
+    # 2026-07-24 추가: 실무 빈도 높은 국토부 고시 3종
+    ("2100000282452", "주택재건축판정을위한재건축진단기준.md"),
+    ("2100000282446", "재건축초과이익환수업무처리지침.md"),
+    ("2100000271910", "정비사업조합설립추진위원회운영규정.md"),
 ]
 
 def fetch(rid):
@@ -62,6 +66,28 @@ def build(rid, fname):
         lines[0] = lines[0][len(prefix):].strip() if lines[0].startswith(prefix) else lines[0]
         body = "\n".join(re.sub(r'[ \t]+', ' ', ln).rstrip() for ln in lines).strip()
         md_parts.append(f"## {heading}\n\n{body}" if body else f"## {heading}")
+
+    # 폴백: 제N조 구조가 아닌 고시(예: 재건축진단 기준의 "1-1-1." 번호체계)는
+    # 조문 파싱이 비므로, 원문 블록을 제N장 단위로 통째 수록한다.
+    if not md_parts:
+        for raw in blocks:
+            text = raw.strip()
+            if not text:
+                continue
+            for seg in re.split(r'(?m)(?=^\s*제\d+장)', text):
+                seg = seg.strip()
+                if not seg:
+                    continue
+                first = seg.split("\n", 1)[0].strip()
+                is_ch = bool(re.match(r'^제\d+장', first))
+                head = first if is_ch else "본문"
+                lines = seg.split("\n")[1:] if is_ch else seg.split("\n")
+                body = "\n".join(re.sub(r'[ \t]+', ' ', ln).rstrip() for ln in lines).strip()
+                md_parts.append(f"## {head}\n\n{body}" if body else f"## {head}")
+        # 별표(평가표 등)가 첨부서식(hwp/pdf)로만 제공되면 그 존재를 명시(점수표는 원문 확인 안내)
+        btitles = [b.strip() for b in re.findall(r'<별표제목>(?:<!\[CDATA\[)?(.*?)(?:\]\]>)?</별표제목>', xml) if b.strip() and b.strip() != "삭제"]
+        if btitles:
+            md_parts.append("## 별표(첨부서식)\n\n다음 평가표·서식은 고시 별표(첨부파일)로 제공되며 구체적 배점·항목은 원문 별표에서 확인해야 합니다: " + ", ".join(btitles))
 
     issue_fmt = f"제{issue_no}호" if issue_no and not issue_no.startswith("제") else issue_no
     fm = (
