@@ -16,7 +16,7 @@ compatibility_date = "2026-07-23"
 # 측정 ID는 어차피 페이지 소스에 노출되는 공개 값이라 시크릿이 아니다(여기 평문으로 둬도 됨).
 # 설정·확인 절차: docs/ga4-운영실적-가이드.md
 [vars]
-GA_ID = ""
+GA_ID = "G-KS5S1ZS621"
 
 # corpus 검색 인덱스는 번들 대신 KV에 저장(무료 한도 1MB 회피). Worker가 콜드스타트에 1회 로드.
 [[kv_namespaces]]
