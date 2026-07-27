@@ -157,6 +157,20 @@ function splitChunks(body, meta) {
   return chunks.concat(subs);
 }
 
+/* 청크 안정 키 — 벡터를 찾아가는 주소.
+ * id(순번)는 파일이 하나만 추가돼도 뒤가 전부 밀려 벡터와 어긋난다.
+ * 그래서 벡터 조회는 "파일명#조문"이라는 내용 기반 키로 한다.
+ * 이 키는 파일이 추가·삭제·이동돼도 그 청크를 계속 같은 이름으로 가리킨다.
+ * (같은 파일에 같은 조문 라벨이 둘 이상이면 ~2, ~3 을 덧붙여 유일성을 보장) */
+const keySeen = new Map();
+function stableKey(file, c) {
+  const label = (c.조문 || c.heading || "").trim();
+  const base = label ? `${file}#${label}` : file;
+  const n = (keySeen.get(base) || 0) + 1;
+  keySeen.set(base, n);
+  return n === 1 ? base : `${base}~${n}`;
+}
+
 const index = [];
 let id = 0;
 for (const dir of CORPUS_DIRS) {
@@ -170,10 +184,14 @@ for (const dir of CORPUS_DIRS) {
     const md = readFileSync(join(dir, f), "utf-8");
     const { meta, body } = parseFrontMatter(md);
     const chunks = splitChunks(body, meta);
-    for (const c of chunks) index.push({ id: id++, 파일: f, ...c });
+    for (const c of chunks) index.push({ id: id++, key: stableKey(f, c), 파일: f, ...c });
     console.log(`  ${f}: ${chunks.length} 청크 (${meta["법령명"]})`);
   }
 }
+
+// 키 유일성 검증 — 중복되면 서로 다른 조문이 같은 벡터를 가리키게 되므로 빌드를 멈춘다.
+const dup = index.length - new Set(index.map((c) => c.key)).size;
+if (dup > 0) throw new Error(`청크 키 중복 ${dup}건 — stableKey 규칙 확인 필요`);
 
 writeFileSync(OUT, JSON.stringify(index, null, 0), "utf-8");
 console.log(`\n✓ ${index.length} 청크 → ${OUT.replace(ROOT + "/", "")}`);

@@ -41,12 +41,35 @@ async function loadIndex(env) {
   return INDEX_CACHE;
 }
 
-// corpus 벡터(int8, 정규화됨)를 KV에서 로드해 캐시. 하이브리드 검색의 의미 검색용.
-let VEC_CACHE = null;
+/* corpus 벡터(int8, 정규화됨) + 키 매니페스트를 KV에서 로드해 캐시.
+ *
+ * 매니페스트('corpus-vector-keys')는 "N번째 벡터가 어느 청크(안정 키)의 것인가"를 담은
+ * 배열이다. 이게 있어야 청크↔벡터를 순번이 아니라 이름으로 잇는다.
+ * 없거나 개수가 안 맞으면 벡터를 통째로 버리고 BM25 단독으로 폴백한다
+ * (어긋난 벡터로 조용히 오염된 순위를 내느니, 의미검색을 끄는 편이 안전하다).
+ *
+ * 캐시는 undefined(미로드) / null(사용 불가) / 객체 를 구분한다.
+ * → '없음'도 캐시해야 매 요청마다 KV를 다시 읽지 않는다.
+ */
+const VEC_DIM = 1024;
+let VEC_CACHE;
 async function loadVectors(env) {
-  if (VEC_CACHE) return VEC_CACHE;
-  const buf = await env.CORPUS_KV.get("corpus-vectors", { type: "arrayBuffer" });
-  VEC_CACHE = buf ? new Int8Array(buf) : null;
+  if (VEC_CACHE !== undefined) return VEC_CACHE;
+  const [buf, keys] = await Promise.all([
+    env.CORPUS_KV.get("corpus-vectors", { type: "arrayBuffer" }),
+    env.CORPUS_KV.get("corpus-vector-keys", { type: "json" }),
+  ]);
+  if (!buf || !Array.isArray(keys) || keys.length * VEC_DIM !== buf.byteLength) {
+    console.log(
+      `[vectors] 매니페스트 불일치 → 의미검색 끄고 BM25 폴백 ` +
+      `(bytes=${buf ? buf.byteLength : "none"}, keys=${Array.isArray(keys) ? keys.length : "none"})`
+    );
+    VEC_CACHE = null;
+    return null;
+  }
+  const offsetOf = new Map();
+  keys.forEach((k, i) => offsetOf.set(k, i));
+  VEC_CACHE = { data: new Int8Array(buf), offsetOf };
   return VEC_CACHE;
 }
 
@@ -208,11 +231,11 @@ export default {
 
       const index = await loadIndex(env);
       // 하이브리드 검색: 질의 임베딩 + corpus 벡터가 있으면 BM25+벡터 융합, 없으면 어휘검색.
-      const [vectors, qv] = await Promise.all([loadVectors(env), embedQuery(env, question)]);
+      const [vecStore, qv] = await Promise.all([loadVectors(env), embedQuery(env, question)]);
       // k=7: 핵심 정의 조문이 상위 5 바로 밖(예: 관리처분계획 제74조는 6위)에 놓이는
       // 경우가 있어 여유를 둔다. 답변 본문이 근거로 삼는 조문이 footer에도 실리도록.
-      let hits = (vectors && qv)
-        ? retrieveHybrid(index, vectors, qv, question, 7, allowedTypes, 1024, region)
+      let hits = (vecStore && qv)
+        ? retrieveHybrid(index, vecStore, qv, question, 7, allowedTypes, VEC_DIM, region)
         : retrieve(index, question, 7, allowedTypes, region);
       // 참조 조문 추적 — "제N조에 따른/준용" 등 위임 참조를 따라가 정답 완성도↑ (판례 전용이면 생략)
       // 검색결과 전체를 스캔(핵심 조문이 상위 밖일 수 있음), 최대 8개 참조 추가.

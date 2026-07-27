@@ -226,20 +226,29 @@ export function retrieve(index, question, k = 5, allowedTypes = null, region = n
  * @param {string[]|null} allowedTypes
  * @param {string|null} region  조례 지역 필터(retrieve로 전달)
  */
-export function retrieveHybrid(index, vectors, queryVec, question, k = 5, allowedTypes = null, dim = 1024, region = null) {
+export function retrieveHybrid(index, vecStore, queryVec, question, k = 5, allowedTypes = null, dim = 1024, region = null) {
   // 어휘(BM25)로 후보군(top-20)을 뽑고, 그 후보 "안에서만" 벡터로 재순위한다.
   // → 의미 검색이 관련 낮은 새 청크를 끌어와 정밀도를 떨어뜨리는 것을 방지(안전한 rerank).
   const bm = retrieve(index, question, 20, allowedTypes, region);
   if (bm.length <= 1) return bm.slice(0, k);
 
+  // 벡터는 청크 순번(id)이 아니라 안정 키(chunk.key)로 찾는다.
+  // 순번으로 찾으면 corpus에 파일 하나만 추가돼도 뒤 청크가 전부 밀려 엉뚱한 벡터를
+  // 가리키고, 그 오염이 에러 없이 조용히 검색 순위를 망친다.
+  const { data, offsetOf } = vecStore;
   const withVec = bm.map((h, bmRank) => {
+    const pos = offsetOf.get(h.chunk.key);
+    // 아직 임베딩되지 않은 신규 청크 → 벡터 점수 없이 BM25 순위만 반영(조용한 오염 대신 안전한 열화).
+    if (pos === undefined) return { chunk: h.chunk, bmRank, vec: null };
     let dot = 0;
-    const off = h.chunk.id * dim;
-    for (let j = 0; j < dim; j++) dot += queryVec[j] * vectors[off + j];
+    const off = pos * dim;
+    for (let j = 0; j < dim; j++) dot += queryVec[j] * data[off + j];
     return { chunk: h.chunk, bmRank, vec: dot };
   });
+  const scored = withVec.filter((x) => x.vec !== null);
+  const NO_VEC_RANK = scored.length; // 벡터 없는 청크는 벡터 순위 최하위로 취급
   const vRank = new Map();
-  [...withVec].sort((a, b) => b.vec - a.vec).forEach((x, r) => vRank.set(x.chunk.id, r));
+  [...scored].sort((a, b) => b.vec - a.vec).forEach((x, r) => vRank.set(x.chunk.key, r));
 
   // RRF는 점수가 아닌 "순위"로 융합하므로, retrieve()의 세법/노후 감점이 여기서 무시된다.
   // → 벡터가 세법 조문(예: 소득세법 양도의 정의)을 끌어올리는 걸 막기 위해 최종 점수에도 감점 적용.
@@ -250,7 +259,7 @@ export function retrieveHybrid(index, vectors, queryVec, question, k = 5, allowe
   return withVec
     .map((x) => ({
       chunk: x.chunk,
-      score: (1 / (RK + x.bmRank) + 1 / (RK + vRank.get(x.chunk.id)))
+      score: (1 / (RK + x.bmRank) + 1 / (RK + (vRank.get(x.chunk.key) ?? NO_VEC_RANK)))
         * domainPenalty(x.chunk.법령명, taxIntent, nogIntent),
     }))
     .sort((a, b) => b.score - a.score)

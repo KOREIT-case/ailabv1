@@ -27,4 +27,11 @@ cd "$ROOT/chatbot/worker"
 # --binding 은 wrangler.toml 의 [[kv_namespaces]] 를 참조하므로 id 가 채워져 있어야 한다.
 npx wrangler kv key put "corpus-index" --path="$INDEX" --binding=CORPUS_KV --remote
 
+# ※ 벡터 키 매니페스트('corpus-vector-keys')는 여기서 올리지 않는다.
+#   매니페스트는 벡터와 짝을 이루므로 **벡터를 새로 만들었을 때만** 갱신한다.
+#   corpus 만 늘렸다면 그대로 두면 되고, 새 청크는 Worker 가 '벡터 없음'으로 처리해
+#   BM25 만으로 검색한다(어긋난 벡터를 쓰는 것보다 안전).
+#   벡터 재생성 후:  node scripts/make-vector-keys.mjs --expect <벡터개수>
+#                    npx wrangler kv key put "corpus-vector-keys" --path=vector-keys.json --binding=CORPUS_KV --remote
+
 echo "✓ corpus-index 업로드 완료 ($(du -h "$INDEX" | cut -f1), $(node -e "console.log(require('$INDEX').length)") 청크)"
