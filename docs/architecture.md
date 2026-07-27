@@ -36,6 +36,10 @@ system-prompt에 이 순서를 명시하여, 충돌 시 상위 규범을 우선�
 ### 3.1 프론트엔드 — `chatbot/public/index.html`
 - 채팅 UI. 질문을 Worker로 보내고 답변을 표시.
 - API 키를 절대 담지 않는다 (Worker가 보관).
+- 운영 실적 측정(GA4) 계측 포함. 측정 시작 시점은 '페이지 열람'이 아니라 **'로그인 입장'**
+  이다(로그인해야 쓰는 도구이므로 실적 단위를 입장으로 잡고, 운영자 점검 계정을
+  방문수까지 통째로 제외하기 위함). 질문 원문은 전송하지 않고 키워드 규칙으로 분류한
+  **질의 유형**만 보낸다. → `docs/ga4-운영실적-가이드.md`
 
 ### 3.2 백엔드 — `chatbot/worker/`
 Cloudflare Worker. 요청당 다음을 수행:
@@ -81,6 +85,9 @@ Cloudflare Worker. 요청당 다음을 수행:
 - [x] Cloudflare 배포 완료: https://jeongbi.explozn87.workers.dev
       (같은 URL이 GET=채팅화면·POST=API 겸함). 접근제한: 공용 비밀번호 로그인
       (`SITE_PASSWORD` 시크릿) + HttpOnly 세션 쿠키. 마크다운 렌더링 적용.
+- [x] 운영 실적 모니터링(GA4) 계측: 이용 건수·질의 유형·검색범위·응답시간·근거없음
+      비율 수집. 측정 ID는 `wrangler.toml [vars] GA_ID` → Worker가 HTML에 주입(미설정 시 꺼짐).
+      운영자 점검 접속은 이름(`박새`) 또는 `?nostat=1` 로 집계 제외.
 - [ ] 개정 감지 스크립트 구현 (`scripts/check-revisions`)
 
 ### 초기 검색을 벡터가 아닌 어휘검색으로 시작한 이유

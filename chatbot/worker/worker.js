@@ -60,6 +60,19 @@ async function embedQuery(env, q) {
   }
 }
 
+/* ── 채팅 화면에 GA4 측정 ID 주입 ──
+ * index.html 의 "__GA_ID__" 자리를 env.GA_ID(wrangler.toml [vars])로 치환해 서빙한다.
+ * GA_ID 를 비워두면 빈 문자열로 치환 → 프론트가 GA 스크립트를 아예 로드하지 않는다(측정 끔).
+ * 치환 결과는 모듈 스코프에 캐시(요청마다 문자열 재생성 방지).
+ */
+let CHAT_HTML_CACHE = null;
+function chatHtml(env) {
+  if (CHAT_HTML_CACHE === null) {
+    CHAT_HTML_CACHE = CHAT_HTML.replaceAll("__GA_ID__", (env.GA_ID || "").trim());
+  }
+  return CHAT_HTML_CACHE;
+}
+
 function json(obj, status = 200, extraHeaders = {}) {
   return new Response(JSON.stringify(obj), {
     status,
@@ -126,7 +139,7 @@ export default {
 
     // GET → 채팅 화면 (로그인은 화면 내에서 처리)
     if (request.method === "GET") {
-      return new Response(CHAT_HTML, {
+      return new Response(chatHtml(env), {
         headers: { "Content-Type": "text/html; charset=utf-8" },
       });
     }

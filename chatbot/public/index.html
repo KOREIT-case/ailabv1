@@ -4,6 +4,74 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>도시정비 법률 챗봇</title>
+
+<!-- ── GA4 운영 실적 측정 ──────────────────────────────────────────────
+  측정 ID는 Worker가 서빙할 때 env.GA_ID 값으로 __GA_ID__ 자리를 치환한다.
+  (wrangler.toml 의 [vars] GA_ID 참조. 미설정이면 track() 이 무동작 →
+   GA 스크립트를 아예 불러오지 않으므로 로컬/미설정 환경에서도 안전.)
+
+  ★ 측정 시작 시점 = "로그인 성공(또는 세션 복구)" 이다. 페이지를 여는 것만으로는
+    아무것도 전송하지 않는다. 이유 2가지:
+      1) 로그인해야 쓸 수 있는 도구라, 실적의 단위는 '방문'이 아니라 '입장'이다.
+      2) 아래 EXCLUDED_USERS(운영자 점검 계정)를 방문수(page_view)까지 통째로 제외하려면
+         초기화 자체를 이름 확인 뒤로 미뤄야 한다.
+
+  수집하는 것: 입장 건수, 질문 건수, 질의 유형, 검색범위, 응답시간, 근거 유무.
+  수집하지 않는 것: 질문 원문·답변 원문·이름(이름은 8자리 해시로만 전송).
+  자세한 설계·설정 절차는 docs/ga4-운영실적-가이드.md 참조.
+-->
+<script>
+(function(){
+  var id = "__GA_ID__";
+
+  /* 실적 집계에서 제외할 사용자 이름 (운영자 점검용).
+     명근이 점검할 때 쓰는 이름. 여기 적힌 이름으로 입장하면 GA 스크립트를 아예
+     로드하지 않아 방문·질문 어느 것도 기록되지 않는다.
+     ※ 이름이 정확히 일치해야 제외된다(앞뒤 공백은 무시). 오타로 들어가면 집계에 잡힌다. */
+  var EXCLUDED_USERS = ["박새"];
+
+  var enabled = false;                                   // gtag 초기화 완료 여부
+  var configured = !id || id.charAt(0) === "_";          // 치환 전/미설정이면 영구 비활성
+  window.track = function(){};                           // 초기화 전 호출은 무동작
+
+  // 이름 → 8자리 해시(FNV-1a). 실사용자 수·재방문 파악용이며 원문 이름은 보내지 않는다.
+  function nameHash(s){
+    var h = 2166136261;
+    for (var i = 0; i < s.length; i++){ h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); }
+    return ("0000000" + (h >>> 0).toString(16)).slice(-8);
+  }
+
+  /* 입장 확정 시 1회 호출 → GA 로드 + page_view 전송 + 사용자 식별.
+     제외 대상이거나 GA_ID 미설정이면 아무 일도 하지 않는다. */
+  window.gaStart = function(name){
+    if (configured || enabled) return;
+    var clean = (name || "").trim();
+    for (var i = 0; i < EXCLUDED_USERS.length; i++){
+      if (clean === EXCLUDED_USERS[i]) { configured = true; return; }   // 운영자 점검 → 측정 안 함
+    }
+    /* 이름 오타 대비 백업 장치 — 주소 뒤에 ?nostat=1 을 붙여 한 번 접속하면
+       그 브라우저는 이후 영구히 측정 제외(브라우저 저장소에 기록).
+       해제: ?nostat=0 으로 접속. */
+    try {
+      if (location.search.indexOf("nostat=1") > -1) localStorage.setItem("nostat", "1");
+      if (location.search.indexOf("nostat=0") > -1) localStorage.removeItem("nostat");
+      if (localStorage.getItem("nostat") === "1") { configured = true; return; }
+    } catch (e) { /* 저장소 차단 환경이면 이름 기준 제외만 적용 */ }
+    window.dataLayer = window.dataLayer || [];
+    window.gtag = function(){ dataLayer.push(arguments); };
+    gtag("js", new Date());
+    gtag("config", id, { anonymize_ip: true, user_id: nameHash(clean) });
+
+    var s = document.createElement("script");
+    s.async = true;
+    s.src = "https://www.googletagmanager.com/gtag/js?id=" + encodeURIComponent(id);
+    document.head.appendChild(s);
+
+    enabled = true;
+    window.track = function(n, params){ try{ gtag("event", n, params || {}); }catch(e){} };
+  };
+})();
+</script>
 <style>
   :root{
     --bg:#0f1115; --panel:#171a21; --border:#262b36;
@@ -151,6 +219,46 @@
         loginBtn = $("loginBtn"), loginErr = $("loginErr");
   const history = [];
 
+  /* ── 질의 유형 분류 (GA4 실적용) ──
+   * 질문 원문은 GA로 보내지 않고, 아래 유형명만 보낸다.
+   * 위에서부터 먼저 걸리는 유형 하나로 판정(구체적인 주제를 위에 둔다).
+   * 유형을 늘리려면 이 표에만 줄을 추가하면 된다(순서 = 우선순위). */
+  const Q_TYPES = [
+    ["재건축부담금",   /초과이익|재건축부담금|부담금|환수/],
+    ["매도청구·청산",  /매도청구|현금청산|청산금|청산자/],
+    ["수용·손실보상",  /수용|손실보상|영업보상|주거이전|이주정착|보상금|감정평가/],
+    ["세금",           /취득세|재산세|양도|종부세|종합부동산|법인세|부가가치세|농어촌특별세|농특세|세율|과세|비과세|감면|중과/],
+    ["관리처분·분양",  /관리처분|분양신청|분양대상|종전자산|종후자산|비례율|권리가액|추가분담/],
+    ["조합·추진위",    /조합설립|추진위|조합원|총회|대의원|임원|결격|동의서|동의율|정관|해산/],
+    ["시공자·계약",    /시공자|시공사|입찰|계약업무|공사비|검증|설계자|정비업체|용역/],
+    ["인가·계획",      /정비구역|정비계획|사업시행계획|사업시행인가|기본계획|촉진지구|재정비촉진|존치/],
+    ["소규모주택정비", /가로주택|자율주택|소규모재건축|소규모주택|빈집/],
+    ["노후계획도시",   /노후계획도시|특별정비구역|기본방침/],
+    ["재건축진단",     /안전진단|재건축진단|정밀진단/],
+    ["신탁방식",       /신탁|사업대행|지정개발자|예비신탁/],
+    ["임대·주택규모",  /임대주택|국민주택|주택규모|소형주택/],
+  ];
+  function classifyQuestion(q){
+    for (const [name, re] of Q_TYPES) if (re.test(q)) return name;
+    return "기타";
+  }
+  // 검색범위를 한 줄 라벨로 (예: "법령+조례(서울특별시)")
+  function scopeLabel(sc){
+    const parts = [];
+    if (sc.law) parts.push("법령");
+    if (sc.prec) parts.push("판례");
+    if (sc.ordRegion) parts.push("조례(" + sc.ordRegion + ")");
+    return parts.join("+") || "없음";
+  }
+  // 답변이 인용한 최상위 근거 법령명 (조례는 지자체 포함). 어떤 법을 많이 찾는지 파악용.
+  function topLaw(sources){
+    const s = sources && sources[0];
+    if (!s) return "없음";
+    if (s.자료유형 === "판례") return "판례 " + (s.사건번호 || "");
+    const name = s.법령명 || "미상";
+    return s.지자체 ? s.지자체 + " " + name : name;
+  }
+
   function getCookie(name){
     return document.cookie.split("; ").reduce((r, c) => {
       const [k, v] = c.split("=");
@@ -170,6 +278,9 @@
 
   /* ── 인증 ── */
   function enterApp(name){
+    // 측정 시작점 = 입장. (신규 로그인·세션 복구 두 경로가 모두 여기를 지난다)
+    // 운영자 점검 계정이면 gaStart 내부에서 걸러져 아무것도 기록되지 않는다.
+    gaStart(name);
     loginEl.style.display = "none";
     $("who").innerHTML = `<b>${name}</b>님<br><button id="logout" type="button">로그아웃</button>`;
     $("logout").addEventListener("click", doLogout);
@@ -187,13 +298,17 @@
         body: JSON.stringify({ name, password: pw })
       });
       const data = await res.json();
-      if(data.ok){ enterApp(data.name || name); }
+      if(data.ok){
+        enterApp(data.name || name);             // 내부에서 gaStart(측정 시작·제외 판정)
+        track("login", { method: "password" });  // 신규 로그인만 집계(세션 복구는 page_view로 잡힘)
+      }
       else { loginErr.textContent = data.error || "비밀번호가 올바르지 않습니다."; loginPw.select(); }
     }catch(err){
       loginErr.textContent = "접속 오류: " + err;
     }finally{ loginBtn.disabled = false; }
   }
   async function doLogout(){
+    track("logout");
     try{ await fetch(API + "/logout", { method:"POST", credentials:"same-origin" }); }
     catch(e){}
     location.reload();
@@ -282,14 +397,20 @@
     history.push({role:"user", content:q});
     input.value = ""; send.disabled = true;
     const thinking = add("bot", "자료를 확인하는 중…");
+    // GA4: 질문 1건 (유형·검색범위·길이만. 질문 원문은 보내지 않는다)
+    const scope = currentScope();
+    const qType = classifyQuestion(q), scLabel = scopeLabel(scope);
+    const t0 = Date.now();
+    track("ask_question", { q_type: qType, scope: scLabel, q_len: q.length });
     try{
       const res = await fetch(API + "/", {
         method:"POST", headers:{"Content-Type":"application/json"},
         credentials:"same-origin",
-        body: JSON.stringify({ question:q, history, scope: currentScope() })
+        body: JSON.stringify({ question:q, history, scope })
       });
       if(res.status === 401){
         thinking.remove();
+        track("answer_shown", { q_type: qType, result: "세션만료", latency_ms: Date.now() - t0 });
         loginErr.textContent = "세션이 만료됐습니다. 다시 로그인하세요.";
         loginEl.style.display = "flex"; loginPw.value = ""; loginName.focus();
         return;
@@ -299,8 +420,19 @@
       const answer = data.answer || data.error || "(응답 없음)";
       add("bot", answer, data.sources);
       history.push({role:"assistant", content:answer});
+      // GA4: 답변 결과 1건 — 근거를 못 찾은 질문이 쌓이면 corpus 보강 신호가 된다.
+      track("answer_shown", {
+        q_type: qType,
+        scope: scLabel,
+        result: data.error ? "오류" : (/^\s*제공된 자료로는/.test(answer) ? "근거없음" : "답변"),
+        latency_ms: Date.now() - t0,
+        top_law: topLaw(data.sources),
+        source_count: (data.sources || []).length,
+      });
     }catch(err){
       thinking.textContent = "요청 중 오류가 발생했습니다: " + err;
+      track("answer_shown", { q_type: qType, scope: scLabel, result: "오류",
+                              latency_ms: Date.now() - t0, top_law: "없음", source_count: 0 });
     }finally{
       send.disabled = false; input.focus();
     }
