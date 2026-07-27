@@ -17,7 +17,11 @@ const CORPUS_DIRS = [
   join(ROOT, "corpus", "admin_rules"), // 행정규칙(고시)
   join(ROOT, "corpus", "ordinances"),  // 자치법규(서울시 조례·규칙)
   join(ROOT, "corpus", "precedents"),  // 판례
+  join(ROOT, "corpus", "tribunals"),   // 심판례(조세심판원 결정)
+  join(ROOT, "corpus", "interpretations"), // 유권해석(법제처 등)
 ];
+// ※ 이 배열의 순서가 청크 id 순서를 정하고, id 는 KV 벡터의 오프셋이다.
+//   순서를 바꾸거나 중간에 폴더를 끼워 넣으면 기존 벡터와 어긋나므로, 새 폴더는 반드시 끝에 추가할 것.
 const OUT = join(ROOT, "chatbot", "worker", "corpus-index.json");
 
 /** 아주 단순한 front matter 파서 (key: value 라인만) */
@@ -100,6 +104,15 @@ function splitChunks(body, meta) {
         법령명: meta["법령명"],
         지자체: meta["지자체"],   // 조례만 값 존재(지역 필터용). 법령·판례는 undefined.
         시행일자: meta["시행일자"],
+        // 심판례(조세심판원)·유권해석 전용 메타. 다른 자료유형에서는 undefined 라
+        // JSON 직렬화 시 자동 생략되므로 인덱스 크기에 영향이 없다.
+        사건번호: meta["사건번호"],
+        사건명: meta["사건명"],
+        기관: meta["기관"],
+        의결일자: meta["의결일자"],
+        세목: meta["세목"],
+        관련법령: meta["관련법령"],
+        쟁점: meta["쟁점"],
         조문: genM[1].trim(),
         제목: "",
         heading: genM[1].trim(),

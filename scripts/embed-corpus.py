@@ -7,7 +7,7 @@ def log(s): LOG.write(s+"\n"); LOG.flush()
 
 # 로그인
 subprocess.run(['curl','-sS','--max-time','20','-X','POST',f'{U}/login','-H','Content-Type: application/json',
-                '-d','{"name":"embed","password":"koreit"}','-c',JAR],capture_output=True,text=True)
+                '-d',json.dumps({"name":"embed","password":os.environ["SITE_PASSWORD"]}),'-c',JAR],capture_output=True,text=True)
 
 d=json.load(open('/home/user/ailabv1/chatbot/worker/corpus-index.json'))
 N=len(d)

@@ -24,7 +24,10 @@ ailabv1/
 │   └── ga4-운영실적-가이드.md      ← 이용 건수·질의 유형 집계(GA4) 설정·확인 절차
 ├── corpus/                       ← 챗봇이 참고하는 법 기반 자료 (RAG 원천)
 │   ├── laws/                     ← 법령 (전문, md)
+│   ├── admin_rules/              ← 행정규칙(고시)
+│   ├── ordinances/               ← 자치법규(지자체 조례·규칙)
 │   ├── precedents/               ← 판례
+│   ├── tribunals/                ← 심판례 (조세심판원 결정)
 │   └── interpretations/          ← 유권해석·행정해석
 ├── index/
 │   └── 법령_시행일_인덱스.md        ← 개정 감지용 시행일 종합표

@@ -9,7 +9,7 @@
  *   2) (최초 1회) wrangler kv namespace create CORPUS_KV → id 를 wrangler.toml 에 기입
  *   3) bash scripts/kv-upload.sh             → corpus-index.json 을 KV 에 업로드
  *   4) wrangler secret put DEEPSEEK_KEY      → DeepSeek 키
- *   5) wrangler secret put SITE_PASSWORD     → 접속 비밀번호 (예: koreit)
+ *   5) wrangler secret put SITE_PASSWORD     → 접속 비밀번호 (코드·문서에 적지 말 것)
  *   6) wrangler deploy
  */
 import { generate } from "./pipeline.mjs";
