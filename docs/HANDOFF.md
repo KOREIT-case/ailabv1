@@ -1,108 +1,164 @@
 # 세션 인계 문서 (도시정비 법률 챗봇)
 
-> 이 문서는 네트워크가 열린 새 세션에서 작업을 이어받기 위한 인계서다.
-> 새 세션 시작 시 이 문서를 먼저 읽고, 아래 "새 세션에서 할 일"부터 진행한다.
+> 새 세션은 이 문서를 먼저 읽고 **§5 다음 세션에서 할 일**부터 진행한다.
+> 최종 갱신: 2026-07-29
 
 ## 1. 프로젝트 개요
 
 - **주체**: 명근 (한국토지신탁, 도시정비사업 기획·리스크관리 총괄)
-- **목표**: 회사 주니어들이 편하게 쓰는 **도시정비 법률 챗봇**
-- **저장소**: `KOREIT-case/ailabv1`, 작업 브랜치 `claude/claude-code-galaxy-tab-80kjy6`
-- **최우선 가치**: 정확성 / **환각 절대 금지** (틀린 답은 없느니만 못함)
+- **목표**: 회사 주니어들이 쓰는 **도시정비 법률 챗봇**. 전산팀이 실적을 보고 사내
+  카카오톡 임직원 채널 게시 여부를 판단하기로 한 상태.
+- **저장소**: `KOREIT-case/ailabv1` / 최신 브랜치 `claude/ga4-monitoring-setup-ick8ff`
+- **배포**: https://jeongbi.explozn87.workers.dev (Cloudflare Worker, 공용 비밀번호 게이트)
+- **최우선 가치**: 정확성 / **환각 절대 금지**. 그 구체적 형태가 아래 대전제다.
 
-## 2. 확정된 설계 결정 (합의 완료)
+> ### ★ 대전제 — 모르면 모른다고 한다
+> 근거가 없으면 답하지 않고, **근거를 못 찾았을 때 그럴듯한 것으로 채우지 않는다.**
+> 근거 표시가 사실과 다른 것은 근거가 없는 것보다 나쁘다.
+> 코드에서 이 원칙을 어기는 폴백을 발견하면 제거 대상으로 본다.
 
-| 항목 | 결정 |
-|---|---|
-| 검색 범위 | 웹검색 차단. `corpus/`의 법 기반 자료(md)만 근거 |
-| 답변 엔진 | DeepSeek API (`temperature:0`). 중국 전송 OK (금융회사, 유출 무관) |
-| 자료 형식 | 전부 md 통일 — **법령도 뼈대만이 아니라 전문(B안)** |
-| 법령 API 역할 | 답변용 아님. **개정 감지 알림 전용**으로만 사용 |
-| 개정 반영 | 반자동 — 시행일 비교로 개정 감지 → 명근에게만 알림 → 명근이 md 교체 |
-| 배포 형태 | HTML 프론트 + Cloudflare Worker 백엔드 (순수 HTML만으론 불가) |
-| 검색 방식 | 벡터검색(RAG). 자료 커질 예정(판례·유권해석 대량) 전제 |
-| 위계 | 답변 근거 우선순위 **법령 > 판례 > 유권해석** (system-prompt에 명시) |
-
-### 핵심 설계 원리 (왜 이렇게 했나)
-- **LLM은 검색 안 한다.** 검색·자료선별은 Worker가 함. DeepSeek은 넣어준 자료로 답만 생성.
-  → 정제 안 된 정보 혼입은 Worker 단계에서 통제.
-- **법령을 API 실시간이 아니라 md로** 둔 이유: 뼈대만 색인하면 조문 세부를 검색이 놓침.
-  전문 md여야 세부까지 벡터검색 대상. 반자동 갱신이라 로컬 md도 며칠 내 최신 유지.
-- 국가법령정보 API는 **개정 감지 알림 경로에만** 둠(답변 경로에서 제외).
-
-## 3. 현재 저장소 상태 (이미 커밋됨)
+## 2. 구조 요약
 
 ```
-ailabv1/
-├── README.md                     전체 개요 + 데이터 흐름도
-├── docs/
-│   ├── architecture.md           설계 결정 전체 기록
-│   ├── metadata-guide.md         ★ md 작성·메타데이터·청킹 규칙 (자료 넣기 전 필독)
-│   ├── 자료추가_가이드.md          새 자료 넣는 실무 절차
-│   └── HANDOFF.md                 (이 문서)
-├── corpus/
-│   ├── laws/          _TEMPLATE.md, _예시_도시정비법.md
-│   ├── precedents/    _TEMPLATE.md
-│   └── interpretations/ _TEMPLATE.md
-├── index/법령_시행일_인덱스.md      개정 감지용 시행일 종합표
-├── chatbot/
-│   ├── public/index.html          채팅 화면 초안 (동작 UI)
-│   └── worker/
-│       ├── system-prompt.md       ★ 환각 방지 규칙 6개
-│       └── worker.example.js       검색+DeepSeek 두뇌 골격
-└── scripts/README.md              인덱스 빌드·개정 감지 도구 계획
+질문 → Worker → ① BM25 + 벡터 하이브리드 검색(corpus)
+              → ② system-prompt + 검색자료 + 대화이력 조립
+              → ③ DeepSeek 생성 → 답변 + 근거
 ```
 
-## 4. 막혔던 지점 (왜 새 세션이 필요한가)
+- corpus(md) → `scripts/build-index.mjs` → `corpus-index.json` → **Cloudflare KV**
+- 벡터(bge-m3, int8) → KV `corpus-vectors` + 키 매니페스트 `corpus-vector-keys`
+- 프론트 `chatbot/public/index.html` 은 Worker 가 문자열로 번들해 직접 서빙
 
-- 이전 세션(갤탭)은 **네트워크 정책이 GitHub·패키지 저장소만 허용**하는 잠금 모드였음.
-- `www.law.go.kr` 등 정부 API가 egress 정책에서 **403 차단** → 법령을 받아 md로 변환 불가.
-- WebFetch·curl·Cloudflare 중계 전부 같은 정책으로 차단됨. (조직 정책 거부라 우회 금지)
-- → **새 세션에서 네트워크 정책을 law.go.kr(또는 전체) 허용으로 열고** 이 작업을 진행하기로 함.
+**KV 키 3개 (전부 운영 필수)**
 
-> 참고: 최종 운영 챗봇은 이 제약과 무관. 실제 API 호출은 Cloudflare Worker(클라우드)가 함.
-> 지금 막힌 건 "법령 대량 → md 1회 변환" 작업뿐.
+| 키 | 내용 | 현재 |
+|---|---|---|
+| `corpus-index` | 청크 배열(JSON) | 4,550청크 |
+| `corpus-vectors` | int8 벡터(1024차원) | 4,550개 = 4,659,200바이트 |
+| `corpus-vector-keys` | 벡터 ↔ 청크 매핑(안정 키 배열) | 4,550개 |
 
-## 5. ★ 새 세션에서 할 일 (바로 이것부터)
+## 3. 현재 상태 (2026-07-29 기준)
 
-**작업: KV 네임스페이스 생성 → corpus-index 업로드 → 시크릿 등록 → 재배포.**
-(코드는 이미 준비됨. 아래는 Cloudflare 계정 접근이 되는 환경에서 실행만 하면 된다.)
+- corpus 4,550청크 = 법령 2,372 / 조례 1,707 / 행정규칙 102 / 판례 96 / **심판례 267 / 유권해석 6**
+- GA4 운영 실적 측정 **가동 중** (측정 ID `G-KS5S1ZS621`) → `docs/ga4-운영실적-가이드.md`
+  - ⚠ **미완료**: GA4 관리화면의 **맞춤 정의 등록**(측정기준 4 + 측정항목 3)과
+    데이터 보관 14개월 설정은 명근이 직접 해야 한다. 등록 전 구간은 유형별 분해가 불가하다.
+- `scripts/healthcheck.mjs` 로 배포본 상태를 한 번에 점검 가능 (전 항목 정상 확인됨)
 
-corpus 는 이제 Worker 번들이 아니라 Cloudflare KV(`CORPUS_KV`)에서 서빙한다.
-worker.js 의 `loadIndex(env)` 가 콜드스타트에 KV `corpus-index` 키를 1회 읽어 캐시한다.
+## 4. 이번 세션에서 한 일 (커밋 6개)
 
-### 절차 (chatbot/worker 기준, wrangler 로그인 상태에서)
-1. `node scripts/build-index.mjs` — corpus-index.json 최신화 (이미 커밋돼 있으면 생략 가능)
-2. `npx wrangler kv namespace create CORPUS` — 출력 id 를
-   `chatbot/worker/wrangler.toml` 의 `[[kv_namespaces]]` id(`REPLACE_WITH_KV_NAMESPACE_ID`)에 기입
-3. `bash scripts/kv-upload.sh` — corpus-index.json → KV(`corpus-index` 키)
-4. `npx wrangler secret put DEEPSEEK_KEY` / `npx wrangler secret put SITE_PASSWORD`
-5. `npx wrangler deploy`
-6. 배포 주소를 `chatbot/public/index.html` 의 `WORKER_URL` 에 기입(자체 서빙이면 생략)
-7. **corpus 갱신 시**: 1) → 3) 만 반복(재배포 불필요, KV만 갱신).
+1. **GA4 계측 도입** — `login` / `ask_question`(질의유형·검색범위·길이) /
+   `answer_shown`(결과·응답시간·인용법령·근거수) / `logout`.
+   질문 원문·답변 원문은 전송하지 않고, 이름은 8자리 해시로만 보낸다.
+   측정 시작점은 '페이지 열람'이 아니라 **'로그인 입장'**.
+   운영자 점검 제외 2중 장치: 로그인 이름 `박새`, 그리고 `?nostat=1`(브라우저 영구 제외).
+2. **유일본 자료 복원** — 심판례 267 + 유권해석 6청크가 KV에만 있고 md 원본이 git 어디에도
+   없었다. KV 청크에서 md 53개를 복원(`scripts/restore-from-kv.mjs`).
+   청크 경계를 그대로 살려 재빌드 결과가 KV와 100% 일치 → 기존 벡터 재사용 가능.
+3. **청크↔벡터 연결을 순번 → 안정 키로 전환** — 아래 §6 지뢰 참조.
+4. **심판례·유권해석을 검색 범위에 편입** — 이 둘이 `allowedTypes` 어디에도 없어
+   자료가 있는데도 한 번도 검색된 적이 없었다. '법령' 범위에 포함.
+5. **거절 시 가짜 근거 표시 제거** (대전제 위반 수정) — `usedSources` 가 인용 조문을
+   못 찾으면 검색 상위 3개를 근거인 척 붙이고 있었다. 이제 빈 배열을 반환한다.
+6. **입력 방어** — `/_embed` 시크릿 잠금, history role 화이트리스트, 질문 2000자 상한,
+   DeepSeek max_tokens·60초 타임아웃, 이름 XSS 이스케이프.
 
-### 참고 — 이번 세션(맥스)에서 이미 완료
-- 세금 법령 6종 corpus 추가: 지방세특례제한법·조세특례제한법·소득세법·종합부동산세법·
-  농어촌특별세법·지방세기본법 (법률 조문만. 소득세=총칙+양도소득, 조특법=정비사업 발췌).
-  → `corpus/laws/`, 시행일 인덱스, corpus-index.json(1,592 청크) 반영.
-- KV 전환 코드: `worker.js`(loadIndex), `wrangler.toml`([[kv_namespaces]]),
-  `scripts/kv-upload.sh` 신규.
-- 검색 검증 통과(취득세 감면→지특법 §74, 조합원입주권 양도세→소득세법 §89,
-  정비사업조합 과세특례→조특법 §104의7).
+## 5. ★ 다음 세션에서 할 일 — 미답변 질문 기록·보완 시스템
 
-### 세금 corpus 변환 방법 (재현/보강용)
-- 변환기 골격은 대화 기록의 `convert_tax.py` 참고. 핵심: `target=law` 전문 XML →
-  `<조문단위>` 순회, `조문여부=전문`(장절 제목) 스킵, `조문내용/항내용/호내용/목내용`
-  CDATA 를 문서순 추출, `## 제N조(제목)` 헤딩(가지번호=제N조의M), 조문 사이 빈 줄.
-- 소득세·조특법은 조항별 시행일이 나뉘어(1/1·7/1) 있어 현행 기준 시행일 **2026-07-01** 로 기록.
-- 서식성 별표는 제외(지방세법 방침과 동일). 감면 세부가 시행령에 있는 경우 후속 보강 대상.
+### 목적
+챗봇이 **답하지 못한 질문을 기록**해두고, 명근이 주기적으로 확인하며 Claude와 함께
+"이 질문에 답하려면 **어떤 근거 자료를 추가해야 하는가**"를 판단해 corpus를 보강한다.
+= 챗봇이 스스로 약점을 드러내고, 그 약점을 하나씩 메우는 루프를 만드는 것.
 
-## 6. 그 다음 로드맵 (참고)
-- 세금 시행령 보강(지특법·종부세 시행령의 감면 요건 세부)
-- `scripts/check-revisions` (개정 감지 알림) 구현
-- 판례·유권해석 추가 → 대량화 시 임베딩/벡터검색 전환(`retrieve.mjs` 교체, 인터페이스 유지)
-- DeepSeek 한국어 법 해석 정확도 실측(샘플 질문셋)
+### 지금 있는 것 / 없는 것
+- 있음: GA4 `answer_shown.result = 근거없음` → **얼마나·어떤 유형이** 막히는지(집계)
+- 없음: **무엇을 물었는지**(질문 원문). GA에는 의도적으로 안 보낸다.
+  → 보완하려면 질문 원문이 필요하므로 **별도 기록 장치가 있어야 한다.**
+
+### 설계 논점 (다음 세션에서 결정할 것)
+
+**(1) 어디에 기록하나**
+- `Cloudflare D1`(SQLite) — 추천. 조회·상태관리(처리됨/보류)·중복 집계에 적합. 무료 티어.
+- `Cloudflare KV` — 이미 바인딩이 있어 즉시 가능하지만, 목록 조회·상태 갱신이 불편.
+
+**(2) 무엇을 기록하나** (진단 가능해야 한다)
+- 질문 원문, 시각, 검색범위(scope), 질의유형, 사용자 해시
+- **검색 상위 청크와 점수** ← 이게 핵심. 없으면 원인 구분이 안 된다.
+- 답변 원문(거절 문구)
+
+**(3) 원인 3분류 — 이걸 나눠야 "무슨 근거를 추가할지"가 나온다**
+
+| 유형 | 판별 단서 | 조치 |
+|---|---|---|
+| (a) 범위 밖 질문 | 검색 상위가 전부 무관 + 질문이 법률 무관(날씨·인사규정) | 무시 |
+| (b) **자료 없음** | 질문은 정비사업인데 관련 조문이 corpus에 없음 | **자료 추가 ← 타깃** |
+| (c) 검색 실패 | 관련 조문이 corpus에 있는데 상위에 안 뜸 | 검색 보정(동의어·가중치) |
+
+**(4) 검토 워크플로**
+1. 명근이 목록 확인 (조회 스크립트 또는 시크릿으로 보호된 엔드포인트)
+2. 건별로 Claude와 원인 분류 → (b)면 `law-api-koreit` 스킬로 관련 법령·조문 탐색
+3. corpus에 md 추가 → `build-index` → KV 업로드 → 필요 시 재임베딩
+4. **그 질문을 다시 던져 답이 나오는지 확인**
+5. 처리 상태 기록
+
+**(5) 부수 효과 — 골든셋이 자연히 쌓인다**
+4단계의 "질문 → 기대 조문" 쌍을 모으면 그대로 **회귀 테스트 골든셋**이 된다.
+현재 `scripts/test-retrieval.mjs` 는 출력만 하고 기대값 검증이 없어, 검색 상수를 바꿨을 때
+다른 질문이 깨지는 걸 못 잡는다. 이 루프가 그 공백을 메운다.
+
+**(6) 고지 문제**
+질문 원문이 서버에 저장되므로, 화면 하단 안내에 한 줄 고지를 넣을지 명근에게 확인할 것.
+
+## 6. ★ 반드시 알아야 할 것 (지뢰·주의사항)
+
+- **corpus에 파일을 추가하면 벡터가 없는 상태가 된다.** 새 청크는 매니페스트에 없어
+  Worker가 '벡터 없음'으로 처리하고 BM25만 쓴다(안전한 열화). 의미검색까지 살리려면
+  재임베딩 후 매니페스트를 갱신해야 한다.
+- **매니페스트(`corpus-vector-keys`)는 벡터를 새로 만들었을 때만 갱신한다.**
+  corpus만 바뀔 때마다 갱신하면 정합성 검증이 무력화된다. `make-vector-keys.mjs --expect N` 사용.
+- **`CORPUS_DIRS` 배열 순서를 바꾸거나 중간에 폴더를 끼우지 말 것.** 새 폴더는 항상 끝에 추가.
+- **KV의 벡터는 백업이 없다.** 원본 md는 복원했지만 벡터는 유일본이다.
+  (재생성은 가능하나 Workers AI 호출 4,550건이 필요하다.)
+- **`/_embed` 는 평소 404다.** 재임베딩할 때만 `wrangler secret put EMBED_TOKEN` 으로 열고,
+  끝나면 `secret delete` 로 반드시 닫는다. 호출 시 `X-Embed-Token` 헤더 필요.
+- **문서와 코드가 어긋난 곳이 있다.** `chatbot/worker/system-prompt.md` 는 사문화됐고
+  실제 규칙은 `pipeline.mjs` 의 `SYSTEM_PROMPT` 상수다(규칙 수·위계가 다름). 코드가 진짜다.
+
+## 7. 남은 미결 이슈 (2026-07-26 코드검토 지적 중 미처리)
+
+- `worker.js` 의 `INDEX_CACHE` 무효화 로직 없음 → KV를 갱신해도 살아있는 isolate는
+  옛 인덱스를 계속 쓴다. "재배포 불필요"라는 문서 설명이 사실과 다르다(버전 키 또는 재배포 명시 필요).
+- `sessionToken` 이 비밀번호 해시 고정값 → 전 사용자가 같은 쿠키. 발급시각+HMAC 필요.
+  `isAuthed` 는 `SITE_PASSWORD` 미설정 시 true 반환(fail-open).
+- BM25가 전체 청크를 substring 스캔 → corpus 크기에 정비례. 현재는 정상 동작하나
+  자료가 더 커지면 Workers CPU 한도 위험. (현재까지 Error 1102 발생 이력 없음)
+- `stripFalseRefusal` — 모델이 정직하게 유보한 답변의 앞부분을 정규식으로 떼어낼 위험.
+  대전제와 방향이 반대라 재검토 대상.
+- 사문화 파일: `worker.example.js`, `scripts/embed-corpus.py`(죽은 경로 참조).
+- 수집 스크립트 7개가 최대 86% 중복 → 공통 모듈화 여지.
+- `scripts/README.md`·`architecture.md` 의 개정감지(`check-revisions`) 서술이 실제와 다름(미구현).
+
+## 8. 운영 절차
+
+```bash
+# 상태 점검 (배포본)
+SITE_PASSWORD=... node scripts/healthcheck.mjs
+
+# corpus 갱신
+node scripts/build-index.mjs
+bash scripts/kv-upload.sh          # corpus-index 만 갱신 (매니페스트는 건드리지 않음)
+
+# 배포 (chatbot/worker 에서, CLOUDFLARE_API_TOKEN 필요)
+npx wrangler deploy
+
+# 벡터를 새로 만든 경우에만
+node scripts/make-vector-keys.mjs --expect <벡터개수>
+npx wrangler kv key put "corpus-vector-keys" --path=vector-keys.json --binding=CORPUS_KV --remote
+```
+
+- Cloudflare API 토큰·DeepSeek 키 등은 Gmail의 **`[secret] 통합 API 키 보관함`** 메일에 있다.
+- 접속 비밀번호는 코드에서 제거했다(과거 git 이력에는 남아 있음. 명근 판단으로 교체는 보류).
 
 ---
-*작성: 이전 세션(갤탭, 네트워크 잠금) → 갱신: 맥스 세션(세금 corpus + KV 전환).
-이어받는 세션은 §5(배포)부터 시작.*
+*갱신: 2026-07-29 세션 (GA4 계측 · 유일본 복원 · 안정키 전환 · 대전제 위반 수정 · 입력 방어).
+이어받는 세션은 §5 부터 시작.*
