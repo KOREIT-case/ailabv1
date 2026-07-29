@@ -129,6 +129,24 @@ GA는 이걸 `result: 답변`으로 집계한다. **여기 쌓이는 건 최우�
 
 ### 5-4. 검토 워크플로 (주기적으로)
 
+#### ★ 명근이 어디서 하나
+
+**기본 경로 — Claude 세션에서 "미답변 질문 확인해줘"라고 말한다.**
+새 세션은 이 저장소를 열고, Gmail `[secret] 통합 API 키 보관함` 에서 `CLOUDFLARE_TOKEN` 을
+꺼내 `CLOUDFLARE_API_TOKEN` 으로 넣은 뒤 아래 명령을 돌린다. 명근은 터미널을 만지지 않는다.
+목록 확인 → 원인 분류 → `law-api-koreit` 로 조문 확보 → corpus 추가 → 재확인 → `--resolve`
+까지 한 세션에서 이어서 처리한다.
+
+**보조 경로 — Cloudflare 대시보드에서 직접 조회** (Claude 없이 건수만 훑을 때)
+dash.cloudflare.com → Storage & Databases → D1 → `jeongbi-logs` → Console 탭:
+```sql
+SELECT hit_count, reason, q_type, question, status
+FROM unanswered WHERE status='미처리' ORDER BY hit_count DESC;
+```
+`top_hits` 는 JSON 이라 눈으로 읽기 불편하다. 원인 판단은 기본 경로로 할 것.
+
+#### 명령
+
 ```bash
 node scripts/unanswered.mjs                # 미처리 목록 — hit_count 큰 순 = 우선순위
 node scripts/unanswered.mjs --stats        # 원인·유형별 집계
