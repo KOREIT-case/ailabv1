@@ -176,7 +176,7 @@
 
   <div class="scopebar">
     <span>검색 범위</span>
-    <label><input type="checkbox" id="scLaw" checked /> 법령</label>
+    <label title="법령·시행령·시행규칙 + 행정규칙(고시) + 유권해석 + 심판례(조세심판원)"> <input type="checkbox" id="scLaw" checked /> 법령</label>
     <label><input type="checkbox" id="scPrec" /> 판례</label>
     <label><input type="checkbox" id="scOrd" /> 조례</label>
     <select id="scOrdRegion" disabled title="조례를 체크하면 지역을 선택할 수 있습니다">
@@ -371,11 +371,14 @@
     const groups = [];        // [{name, arts:[], prec}]
     const idx = new Map();     // 법령명 → groups 인덱스 (같은 법 묶기)
     for (const m of sources){
-      if (m.자료유형 === "판례"){
-        groups.push({ name: m.법령명 || ("판례 " + (m.사건번호 || "")), arts: [], prec: true });
+      // 판례·심판례는 사건 단위라 조문 표기 없이 사건번호로만 묶는다.
+      if (m.자료유형 === "판례" || m.자료유형 === "심판례"){
+        groups.push({ name: m.법령명 || (m.자료유형 + " " + (m.사건번호 || "")), arts: [], prec: true });
         continue;
       }
-      const name = m.자료유형 === "유권해석" ? ("유권해석 " + (m.문서번호 || "")) : (m.법령명 || "");
+      const name = m.자료유형 === "유권해석"
+        ? (m.법령명 || ("유권해석 " + (m.문서번호 || m.사건번호 || "")))
+        : (m.법령명 || "");
       const art = (m.조문 || "").trim();
       if (!idx.has(name)){ idx.set(name, groups.length); groups.push({ name, arts: [] }); }
       if (art) groups[idx.get(name)].arts.push(art);

@@ -222,11 +222,14 @@ export default {
         prec = !!scope.prec;
         ordRegion = scope.ordRegion || null;
       }
+      // '법령' 범위에는 유권해석(법령 해석)과 심판례(조세심판원 결정)도 포함한다.
+      // 이 둘이 어느 목록에도 없어 검색 후보에서 통째로 빠져 있었다(자료는 있는데 한 번도 안 쓰임).
+      const LAW_TYPES = ["법령", "행정규칙", "유권해석", "심판례"];
       const allowedTypes = [];
-      if (law) allowedTypes.push("법령", "행정규칙");
+      if (law) allowedTypes.push(...LAW_TYPES);
       if (prec) allowedTypes.push("판례");
       if (ordRegion) allowedTypes.push("조례");
-      if (!allowedTypes.length) allowedTypes.push("법령", "행정규칙"); // 안전 기본
+      if (!allowedTypes.length) allowedTypes.push(...LAW_TYPES); // 안전 기본
       const region = ordRegion;
 
       const index = await loadIndex(env);
