@@ -32,7 +32,7 @@ id = "dfae6c10495d4a2cae9cd8ca707ff6be"
 [[d1_databases]]
 binding = "LOGS_DB"
 database_name = "jeongbi-logs"
-database_id = "REPLACE_WITH_D1_DATABASE_ID"
+database_id = "58e91a29-41ef-42f7-880a-9c78190bff4a"
 
 # Workers AI 바인딩 — 임베딩(@cf/baai/bge-m3)을 런타임에 호출(벡터 하이브리드 검색).
 [ai]

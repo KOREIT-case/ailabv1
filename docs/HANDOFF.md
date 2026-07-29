@@ -44,7 +44,7 @@
   - ⚠ **미완료**: GA4 관리화면의 **맞춤 정의 등록**(측정기준 4 + 측정항목 3)과
     데이터 보관 14개월 설정은 명근이 직접 해야 한다. 등록 전 구간은 유형별 분해가 불가하다.
 - `scripts/healthcheck.mjs` 로 배포본 상태를 한 번에 점검 가능 (전 항목 정상 확인됨)
-- 미답변 질문 기록 시스템 **코드 완료, 배포 대기** → §5-3 (D1 생성 + database_id 기입 필요)
+- 미답변 질문 기록 시스템 **가동 중** (D1 `jeongbi-logs`) → §5. 검토: `node scripts/unanswered.mjs`
 
 ## 4. 이번 세션에서 한 일 (커밋 6개)
 
@@ -64,7 +64,7 @@
 6. **입력 방어** — `/_embed` 시크릿 잠금, history role 화이트리스트, 질문 2000자 상한,
    DeepSeek max_tokens·60초 타임아웃, 이름 XSS 이스케이프.
 
-## 5. ★ 미답변 질문 기록·보완 시스템 (코드 완료 / **배포 미완**)
+## 5. ★ 미답변 질문 기록·보완 시스템 (**가동 중**)
 
 챗봇이 답하지 못한 질문을 D1에 쌓아두고, 명근이 주기적으로 확인하며 Claude와 함께
 "이 질문에 답하려면 어떤 근거 자료를 추가해야 하는가"를 판단해 corpus를 보강하는 루프.
@@ -95,19 +95,26 @@ GA는 이걸 `result: 답변`으로 집계한다. **여기 쌓이는 건 최우�
 덤: §7의 `stripFalseRefusal`(정직한 유보를 정규식으로 떼어낼 위험) 재검토도
 이 기록이 쌓이면 추측이 아니라 실측으로 판단할 수 있다.
 
-### 5-3. 남은 일 — 배포 (Cloudflare 접근이 되는 환경에서)
+### 5-3. 배포 완료 (2026-07-29)
 
-```bash
-cd chatbot/worker
-npx wrangler d1 create jeongbi-logs        # → 출력된 database_id 를 wrangler.toml 에 기입
-cd ../.. && node scripts/unanswered.mjs --init   # 테이블 생성
-bash scripts/kv-upload.sh                  # corpus-version 키를 처음 올린다(캐시 무효화용)
-cd chatbot/worker && npx wrangler deploy
-SITE_PASSWORD=... node scripts/healthcheck.mjs   # 회귀 확인
-```
+- D1 `jeongbi-logs` 생성(region ENAM), `database_id` 는 `wrangler.toml` 에 기입됨
+- `unanswered` 테이블 생성 완료, Worker 배포 완료(Version `807deb25`)
+- KV `corpus-version` 키 생성 → 인덱스 캐시 무효화 가동
 
-> `database_id` 를 안 채우면 `LOGS_DB` 바인딩이 없는 상태가 되고, **챗봇은 정상 동작하되
-> 기록 기능만 꺼진다.** (`logIfUnanswered` 가 조용히 건너뛴다)
+**실측 검증 결과**
+
+| 항목 | 결과 |
+|---|---|
+| healthcheck 15항목 회귀 | 전 항목 정상 |
+| 실패 질문 D1 기록 | 정상 (모델거절·검색0건 모두) |
+| 중복 집계 | 구두점만 다른 질문 → 같은 행 `hit_count 2` |
+| 운영자 제외 | healthcheck 의 범위 밖 질문 2건이 큐에 **안 쌓임** |
+| `top_hits` 진단 | 상위 7건+점수 기록 → 원인 분류 가능 |
+| 캐시 무효화 | 웜 isolate 가 버전 변경 감지 후 `4550청크` 재로드 로그 확인 |
+
+> D1 권한 주의: `CLOUDFLARE_TOKEN` 은 원래 `Edit Cloudflare Workers` 범위라 D1 생성이
+> 막혔다(`Authentication error [code: 10000]`). 명근이 `Account / D1 / Edit` 를 추가해 해결.
+> 토큰을 재발급할 때는 `Workers Scripts:Edit` + `Workers KV:Edit` + `D1:Edit` 를 챙길 것.
 
 ### 5-4. 검토 워크플로 (주기적으로)
 
@@ -209,4 +216,5 @@ npx wrangler kv key put "corpus-vector-keys" --path=vector-keys.json --binding=C
 ---
 *갱신: 2026-07-29 세션 (GA4 계측 · 유일본 복원 · 안정키 전환 · 대전제 위반 수정 · 입력 방어)
 → 2026-07-29 세션 (미답변 질문 기록·보완 시스템 + 인덱스 캐시 무효화).
-이어받는 세션은 §5-3(배포)부터 시작.*
+이어받는 세션은 §5-4(검토 워크플로)를 돌리는 것부터 시작 — 실제 미답변 질문이 쌓이면
+Claude와 함께 원인을 분류하고 corpus를 보강한다.*
