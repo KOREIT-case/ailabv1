@@ -282,7 +282,8 @@
     // 운영자 점검 계정이면 gaStart 내부에서 걸러져 아무것도 기록되지 않는다.
     gaStart(name);
     loginEl.style.display = "none";
-    $("who").innerHTML = `<b>${name}</b>님<br><button id="logout" type="button">로그아웃</button>`;
+    // 이름은 쿠키에서 오므로 반드시 이스케이프한다(태그를 이름으로 넣는 self-XSS 차단).
+    $("who").innerHTML = `<b>${esc(name)}</b>님<br><button id="logout" type="button">로그아웃</button>`;
     $("logout").addEventListener("click", doLogout);
     input.focus();
   }

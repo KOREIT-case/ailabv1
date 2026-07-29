@@ -45,22 +45,34 @@ export function buildSystemMessage(hits) {
 
 /** DeepSeek chat completions 호출 */
 export async function callDeepSeek(env, systemMessage, history, question) {
-  const res = await fetch("https://api.deepseek.com/chat/completions", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${env.DEEPSEEK_KEY}`,
-    },
-    body: JSON.stringify({
-      model: "deepseek-chat",
-      temperature: 0, // 사실 기반 → 창의성 최소화
-      messages: [
-        { role: "system", content: systemMessage },
-        ...history,
-        { role: "user", content: question },
-      ],
-    }),
-  });
+  // 응답이 오지 않을 때 요청이 무한정 매달리지 않도록 상한을 둔다(사용자 대기 + 비용 방어).
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), 60_000);
+  let res;
+  try {
+    res = await fetch("https://api.deepseek.com/chat/completions", {
+      method: "POST",
+      signal: ac.signal,
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${env.DEEPSEEK_KEY}`,
+      },
+      body: JSON.stringify({
+        model: "deepseek-chat",
+        temperature: 0, // 사실 기반 → 창의성 최소화
+        max_tokens: 2000, // 답변 길이 상한(비용 예측 가능하게)
+        messages: [
+          { role: "system", content: systemMessage },
+          ...history,
+          { role: "user", content: question },
+        ],
+      }),
+    });
+  } catch (e) {
+    throw new Error(e.name === "AbortError" ? "DeepSeek 응답 시간 초과(60초)" : String(e));
+  } finally {
+    clearTimeout(timer);
+  }
   if (!res.ok) throw new Error(`DeepSeek ${res.status}: ${await res.text()}`);
   const data = await res.json();
   return data?.choices?.[0]?.message?.content ?? "(응답 없음)";

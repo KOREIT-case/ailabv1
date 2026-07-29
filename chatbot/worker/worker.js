@@ -134,8 +134,19 @@ export default {
     const url = new URL(request.url);
     const path = url.pathname;
 
-    // 임베딩 배치 (인증 필요) — corpus 임베딩 오케스트레이션·질의 임베딩에 사용.
+    /* 임베딩 배치 — corpus 재임베딩 작업용.
+     * 로그인만으로 열어두면 접속 가능한 누구나 Workers AI를 임의 호출(=과금)할 수 있어,
+     * 별도 시크릿(EMBED_TOKEN)이 설정돼 있고 헤더가 일치할 때만 동작한다.
+     * 평소에는 시크릿을 두지 않아 404 로 닫혀 있고, 재임베딩할 때만 잠시 연다:
+     *   npx wrangler secret put EMBED_TOKEN     # 작업 시작 시
+     *   npx wrangler secret delete EMBED_TOKEN  # 작업 끝나면 반드시 삭제
+     * 호출: -H "X-Embed-Token: <값>" (로그인 세션도 함께 필요)
+     */
     if (request.method === "POST" && path === "/_embed") {
+      if (!env.EMBED_TOKEN) return new Response("Not Found", { status: 404 });
+      if (request.headers.get("X-Embed-Token") !== env.EMBED_TOKEN) {
+        return json({ error: "unauthorized" }, 401);
+      }
       if (!(await isAuthed(request, env))) return json({ error: "unauthorized" }, 401);
       try {
         const { texts } = await request.json();
@@ -207,6 +218,20 @@ export default {
       const { question, history = [], scope = {} } = await request.json();
       if (!question || !question.trim()) return json({ error: "질문이 비어 있습니다" }, 400);
 
+      /* 클라이언트 입력 검증.
+       * history 는 그대로 DeepSeek 의 messages 에 펼쳐지므로, 검증 없이 받으면
+       * role:"system" 객체를 끼워 넣어 환각 방지 규칙을 통째로 덮을 수 있다.
+       * 이 프로젝트의 가드레일이 클라이언트 입력으로 뚫리면 안 되므로 화이트리스트로 거른다.
+       * 길이·개수 상한은 프롬프트 비용이 무한정 늘어나는 것도 함께 막는다. */
+      const MAX_Q = 2000, MAX_TURNS = 20, MAX_MSG = 4000;
+      if (question.length > MAX_Q) {
+        return json({ error: `질문이 너무 깁니다 (최대 ${MAX_Q}자)` }, 400);
+      }
+      const safeHistory = (Array.isArray(history) ? history : [])
+        .filter((m) => m && typeof m.content === "string" && (m.role === "user" || m.role === "assistant"))
+        .slice(-MAX_TURNS)
+        .map((m) => ({ role: m.role, content: m.content.slice(0, MAX_MSG) }));
+
       // 검색 범위. scope = { law, prec, ordRegion } 객체.
       //  · 기본은 법령(+행정규칙)만. 판례는 opt-in. 조례는 "지역을 고른 경우에만" 포함.
       //  · 조례는 지자체마다 문구가 비슷해, 지역을 지정하지 않으면 검색에서 제외한다
@@ -243,7 +268,7 @@ export default {
       // 참조 조문 추적 — "제N조에 따른/준용" 등 위임 참조를 따라가 정답 완성도↑ (판례 전용이면 생략)
       // 검색결과 전체를 스캔(핵심 조문이 상위 밖일 수 있음), 최대 8개 참조 추가.
       if (law || ordRegion) hits = expandReferences(hits, index, allowedTypes, 3, hits.length);
-      const { answer: text, sources } = await generate(question, history, env, hits);
+      const { answer: text, sources } = await generate(question, safeHistory, env, hits);
       return json({ answer: text, sources });
     } catch (e) {
       return json({ error: String(e) }, 500);
