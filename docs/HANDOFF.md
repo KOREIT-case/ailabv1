@@ -44,6 +44,7 @@
   - ⚠ **미완료**: GA4 관리화면의 **맞춤 정의 등록**(측정기준 4 + 측정항목 3)과
     데이터 보관 14개월 설정은 명근이 직접 해야 한다. 등록 전 구간은 유형별 분해가 불가하다.
 - `scripts/healthcheck.mjs` 로 배포본 상태를 한 번에 점검 가능 (전 항목 정상 확인됨)
+- 미답변 질문 기록 시스템 **코드 완료, 배포 대기** → §5-3 (D1 생성 + database_id 기입 필요)
 
 ## 4. 이번 세션에서 한 일 (커밋 6개)
 
@@ -63,51 +64,89 @@
 6. **입력 방어** — `/_embed` 시크릿 잠금, history role 화이트리스트, 질문 2000자 상한,
    DeepSeek max_tokens·60초 타임아웃, 이름 XSS 이스케이프.
 
-## 5. ★ 다음 세션에서 할 일 — 미답변 질문 기록·보완 시스템
+## 5. ★ 미답변 질문 기록·보완 시스템 (코드 완료 / **배포 미완**)
 
-### 목적
-챗봇이 **답하지 못한 질문을 기록**해두고, 명근이 주기적으로 확인하며 Claude와 함께
-"이 질문에 답하려면 **어떤 근거 자료를 추가해야 하는가**"를 판단해 corpus를 보강한다.
-= 챗봇이 스스로 약점을 드러내고, 그 약점을 하나씩 메우는 루프를 만드는 것.
+챗봇이 답하지 못한 질문을 D1에 쌓아두고, 명근이 주기적으로 확인하며 Claude와 함께
+"이 질문에 답하려면 어떤 근거 자료를 추가해야 하는가"를 판단해 corpus를 보강하는 루프.
 
-### 지금 있는 것 / 없는 것
-- 있음: GA4 `answer_shown.result = 근거없음` → **얼마나·어떤 유형이** 막히는지(집계)
-- 없음: **무엇을 물었는지**(질문 원문). GA에는 의도적으로 안 보낸다.
-  → 보완하려면 질문 원문이 필요하므로 **별도 기록 장치가 있어야 한다.**
+### 5-1. 결정된 설계
 
-### 설계 논점 (다음 세션에서 결정할 것)
-
-**(1) 어디에 기록하나**
-- `Cloudflare D1`(SQLite) — 추천. 조회·상태관리(처리됨/보류)·중복 집계에 적합. 무료 티어.
-- `Cloudflare KV` — 이미 바인딩이 있어 즉시 가능하지만, 목록 조회·상태 갱신이 불편.
-
-**(2) 무엇을 기록하나** (진단 가능해야 한다)
-- 질문 원문, 시각, 검색범위(scope), 질의유형, 사용자 해시
-- **검색 상위 청크와 점수** ← 이게 핵심. 없으면 원인 구분이 안 된다.
-- 답변 원문(거절 문구)
-
-**(3) 원인 3분류 — 이걸 나눠야 "무슨 근거를 추가할지"가 나온다**
-
-| 유형 | 판별 단서 | 조치 |
+| 논점 | 결정 | 이유 |
 |---|---|---|
-| (a) 범위 밖 질문 | 검색 상위가 전부 무관 + 질문이 법률 무관(날씨·인사규정) | 무시 |
-| (b) **자료 없음** | 질문은 정비사업인데 관련 조문이 corpus에 없음 | **자료 추가 ← 타깃** |
-| (c) 검색 실패 | 관련 조문이 corpus에 있는데 상위에 안 뜸 | 검색 보정(동의어·가중치) |
+| 저장소 | **Cloudflare D1** (`LOGS_DB` / `jeongbi-logs`) | 상태를 가진 검토 큐 = 관계형. KV는 목록조회·상태갱신·중복집계가 전부 불편 |
+| 기록 범위 | **실패 3종만** (성공 답변은 저장 안 함) | 저장량·프라이버시 부담 최소화 |
+| 조회 | **로컬 스크립트만** (`scripts/unanswered.mjs`) | 질문 원문 조회 API를 §7의 취약한 인증 위에 얹지 않기 위해. 배포 표면 증가 0 |
+| 화면 고지 | **넣지 않음** | 명근 판단 |
 
-**(4) 검토 워크플로**
-1. 명근이 목록 확인 (조회 스크립트 또는 시크릿으로 보호된 엔드포인트)
-2. 건별로 Claude와 원인 분류 → (b)면 `law-api-koreit` 스킬로 관련 법령·조문 탐색
-3. corpus에 md 추가 → `build-index` → KV 업로드 → 필요 시 재임베딩
-4. **그 질문을 다시 던져 답이 나오는지 확인**
-5. 처리 상태 기록
+### 5-2. ★ 실패 3종 — GA가 못 잡던 것이 하나 있다
 
-**(5) 부수 효과 — 골든셋이 자연히 쌓인다**
-4단계의 "질문 → 기대 조문" 쌍을 모으면 그대로 **회귀 테스트 골든셋**이 된다.
-현재 `scripts/test-retrieval.mjs` 는 출력만 하고 기대값 검증이 없어, 검색 상수를 바꿨을 때
-다른 질문이 깨지는 걸 못 잡는다. 이 루프가 그 공백을 메운다.
+| reason | 판별 | GA 포착 |
+|---|---|---|
+| `검색0건` | 검색이 후보를 0건 냄 → pipeline이 즉시 NO_EVIDENCE | ✅ |
+| `모델거절` | 답변이 "제공된 자료로는"으로 시작 | ✅ |
+| **`근거미표시`** | **거절도 아닌데 `sources`가 빈 배열** | ❌ |
 
-**(6) 고지 문제**
-질문 원문이 서버에 저장되므로, 화면 하단 안내에 한 줄 고지를 넣을지 명근에게 확인할 것.
+`근거미표시`가 이번에 새로 보이게 된 것이다. §4-5에서 "가짜 근거 붙이기"를 없앤 뒤로
+이 경우 **답변은 화면에 뜨는데 근거는 하나도 안 붙는다.** 원인은 둘 중 하나 —
+모델이 인용 형식(규칙 3)을 안 지켰거나, **자료 없이 답했거나(=환각)**.
+대전제상 가장 위험한 케이스인데 프론트 GA 판별식이 `/^\s*제공된 자료로는/` 이라
+GA는 이걸 `result: 답변`으로 집계한다. **여기 쌓이는 건 최우선으로 볼 것.**
+
+덤: §7의 `stripFalseRefusal`(정직한 유보를 정규식으로 떼어낼 위험) 재검토도
+이 기록이 쌓이면 추측이 아니라 실측으로 판단할 수 있다.
+
+### 5-3. 남은 일 — 배포 (Cloudflare 접근이 되는 환경에서)
+
+```bash
+cd chatbot/worker
+npx wrangler d1 create jeongbi-logs        # → 출력된 database_id 를 wrangler.toml 에 기입
+cd ../.. && node scripts/unanswered.mjs --init   # 테이블 생성
+bash scripts/kv-upload.sh                  # corpus-version 키를 처음 올린다(캐시 무효화용)
+cd chatbot/worker && npx wrangler deploy
+SITE_PASSWORD=... node scripts/healthcheck.mjs   # 회귀 확인
+```
+
+> `database_id` 를 안 채우면 `LOGS_DB` 바인딩이 없는 상태가 되고, **챗봇은 정상 동작하되
+> 기록 기능만 꺼진다.** (`logIfUnanswered` 가 조용히 건너뛴다)
+
+### 5-4. 검토 워크플로 (주기적으로)
+
+```bash
+node scripts/unanswered.mjs                # 미처리 목록 — hit_count 큰 순 = 우선순위
+node scripts/unanswered.mjs --stats        # 원인·유형별 집계
+node scripts/unanswered.mjs --id <qhash>   # 상세: 검색 상위 7건과 점수
+```
+
+`--id` 의 검색 상위 목록으로 원인을 가른다:
+
+| 판별 | 조치 |
+|---|---|
+| 상위가 전부 무관 + 법률 무관 질의 | `--status 범위밖` (무시) |
+| 정비 질의인데 관련 조문이 corpus에 **없음** | `--status 자료추가` ← **본래 목표**. `law-api-koreit` 로 조문 확보 |
+| 관련 조문이 corpus에 **있는데** 상위에 안 뜸 | `--status 검색보정` (`retrieve.mjs` 의 `SYN`·가중치) |
+
+자료를 넣은 뒤:
+```bash
+node scripts/build-index.mjs && bash scripts/kv-upload.sh
+# ★ 최대 60초 대기 (corpus-version 이 전 isolate 에 퍼지는 시간)
+#   그 질문을 다시 던져 답이 나오는지 확인
+node scripts/unanswered.mjs --resolve <qhash> --status 해결 \
+     --note "지특법 제31조 추가" --expect "지방세특례제한법 제31조"
+```
+
+- `--expect` 를 주면 `tests/golden.jsonl` 에 "질문 → 기대 조문" 회귀 케이스가 쌓인다.
+  표본이 모이면 `scripts/test-retrieval.mjs` 에 기대값 검증을 붙인다(현재는 출력만 함).
+- `해결`로 닫은 질문이 **다시 실패하면 자동으로 `미처리`로 되돌아온다**(회귀 감지).
+
+### 5-5. 주의
+
+- **운영자 점검 계정은 기록에서 제외된다** (`unanswered.mjs` 의 `EXCLUDED_USERS`).
+  `healthcheck.mjs` 가 대전제 검증용으로 일부러 던지는 범위 밖 질문("오늘 서울 날씨 어때?")이
+  검토 큐를 오염시키지 않도록. 프론트 `index.html` 의 GA 제외 명단과 **같은 값으로 유지할 것.**
+- 현재 명단은 `["박새", "상태점검"]`. 프론트 `EXCLUDED_USERS` 에는 `상태점검` 이 **아직 없어서**
+  healthcheck 실행분이 GA 실적에 잡힌다 → 추가 권장.
+- `q_type` 은 프론트가 계산해 body 에 동봉하고 서버는 화이트리스트 검증만 한다.
+  분류 로직을 서버에 복제하면 두 벌이 어긋나 GA↔D1 교차 확인이 깨진다. **목록만 동기화.**
 
 ## 6. ★ 반드시 알아야 할 것 (지뢰·주의사항)
 
@@ -126,8 +165,9 @@
 
 ## 7. 남은 미결 이슈 (2026-07-26 코드검토 지적 중 미처리)
 
-- `worker.js` 의 `INDEX_CACHE` 무효화 로직 없음 → KV를 갱신해도 살아있는 isolate는
-  옛 인덱스를 계속 쓴다. "재배포 불필요"라는 문서 설명이 사실과 다르다(버전 키 또는 재배포 명시 필요).
+- ~~`worker.js` 의 `INDEX_CACHE` 무효화 로직 없음~~ → **해결**. KV `corpus-version` 키를
+  60초에 한 번 확인해 바뀌었으면 인덱스·벡터 캐시를 버린다(§5 보완 루프의 재질문 확인이
+  옛 인덱스에 걸려 오판하는 걸 막기 위해 같이 고침). `kv-upload.sh` 가 버전을 함께 올린다.
 - `sessionToken` 이 비밀번호 해시 고정값 → 전 사용자가 같은 쿠키. 발급시각+HMAC 필요.
   `isAuthed` 는 `SITE_PASSWORD` 미설정 시 true 반환(fail-open).
 - BM25가 전체 청크를 substring 스캔 → corpus 크기에 정비례. 현재는 정상 동작하나
@@ -146,7 +186,14 @@ SITE_PASSWORD=... node scripts/healthcheck.mjs
 
 # corpus 갱신
 node scripts/build-index.mjs
-bash scripts/kv-upload.sh          # corpus-index 만 갱신 (매니페스트는 건드리지 않음)
+bash scripts/kv-upload.sh          # corpus-index + corpus-version 갱신 (매니페스트는 안 건드림)
+                                   # → 최대 60초 뒤 살아있는 isolate 에 반영
+
+# 미답변 질문 검토 (§5)
+node scripts/unanswered.mjs                 # 미처리 목록
+node scripts/unanswered.mjs --stats         # 원인·유형별 집계
+node scripts/unanswered.mjs --id <qhash>    # 상세(검색 상위 7건)
+node scripts/unanswered.mjs --resolve <qhash> --status 자료추가 --note "..."
 
 # 배포 (chatbot/worker 에서, CLOUDFLARE_API_TOKEN 필요)
 npx wrangler deploy
@@ -160,5 +207,6 @@ npx wrangler kv key put "corpus-vector-keys" --path=vector-keys.json --binding=C
 - 접속 비밀번호는 코드에서 제거했다(과거 git 이력에는 남아 있음. 명근 판단으로 교체는 보류).
 
 ---
-*갱신: 2026-07-29 세션 (GA4 계측 · 유일본 복원 · 안정키 전환 · 대전제 위반 수정 · 입력 방어).
-이어받는 세션은 §5 부터 시작.*
+*갱신: 2026-07-29 세션 (GA4 계측 · 유일본 복원 · 안정키 전환 · 대전제 위반 수정 · 입력 방어)
+→ 2026-07-29 세션 (미답변 질문 기록·보완 시스템 + 인덱스 캐시 무효화).
+이어받는 세션은 §5-3(배포)부터 시작.*

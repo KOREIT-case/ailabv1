@@ -27,6 +27,14 @@ cd "$ROOT/chatbot/worker"
 # --binding 은 wrangler.toml 의 [[kv_namespaces]] 를 참조하므로 id 가 채워져 있어야 한다.
 npx wrangler kv key put "corpus-index" --path="$INDEX" --binding=CORPUS_KV --remote
 
+# corpus-version — 살아있는 Worker isolate 의 인덱스 캐시를 무효화하는 신호.
+# Worker 는 이 값을 60초에 한 번 확인해 바뀌었으면 인덱스·벡터 캐시를 버리고 다시 읽는다.
+# 이게 없으면 KV를 갱신해도 옛 인덱스가 계속 쓰여, 자료를 보강하고 재질문으로 확인할 때
+# "아직도 못 답하네"로 오판하게 된다. 반드시 corpus-index 와 짝으로 올린다.
+VERSION="$(date -u +%Y%m%dT%H%M%SZ)-$(node -e "console.log(require('$INDEX').length)")"
+npx wrangler kv key put "corpus-version" "$VERSION" --binding=CORPUS_KV --remote
+echo "✓ corpus-version = $VERSION (최대 60초 뒤 전 isolate 반영)"
+
 # ※ 벡터 키 매니페스트('corpus-vector-keys')는 여기서 올리지 않는다.
 #   매니페스트는 벡터와 짝을 이루므로 **벡터를 새로 만들었을 때만** 갱신한다.
 #   corpus 만 늘렸다면 그대로 두면 되고, 새 청크는 Worker 가 '벡터 없음'으로 처리해

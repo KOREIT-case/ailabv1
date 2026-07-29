@@ -14,6 +14,7 @@
  */
 import { generate } from "./pipeline.mjs";
 import { retrieve, retrieveHybrid, normalizeVec, expandReferences } from "./retrieve.mjs";
+import { logIfUnanswered } from "./unanswered.mjs";
 import CHAT_HTML from "../public/index.html"; // 채팅 화면 (wrangler Text 룰로 문자열 번들)
 import bg1 from "./bg/bg1.jpg"; // 배경 이미지 4종 (Data 룰 → ArrayBuffer)
 import bg2 from "./bg/bg2.jpg";
@@ -24,20 +25,45 @@ const BGS = { "1": bg1, "2": bg2, "3": bg3, "4": bg4 };
 /* ── corpus 인덱스: Cloudflare KV 에서 로드 ──
  * corpus-index.json 은 Worker 번들에 넣지 않고 KV(CORPUS_KV)의 'corpus-index' 키에 둔다.
  * → Worker 번들 1MB(무료) 한도와 무관하게 corpus 를 계속 키울 수 있다.
- * 콜드스타트에 KV에서 1회 읽어 파싱하고 모듈 스코프에 캐시 → 웜 요청은 재사용(0회 읽기).
+ * 콜드스타트에 KV에서 1회 읽어 파싱하고 모듈 스코프에 캐시 → 웜 요청은 재사용.
  * 업로드 절차: node scripts/build-index.mjs  →  bash scripts/kv-upload.sh
+ *
+ * ★ 캐시 무효화(버전 키)
+ *   예전에는 한 번 캐시하면 영영 놓지 않아, KV를 갱신해도 살아있는 isolate 는 옛 인덱스를
+ *   계속 썼다. 미답변 질문 보완 루프의 마지막 단계가 "자료를 넣고 그 질문을 다시 던져
+ *   답이 나오는지 확인"인데, 그 확인이 옛 인덱스에 걸리면 제대로 보완하고도 실패로
+ *   오판하게 된다. 그래서 KV의 'corpus-version'(kv-upload.sh 가 함께 올림)을
+ *   최대 60초에 한 번만 확인하고, 값이 바뀌었으면 인덱스와 벡터 캐시를 버린다.
+ *   → 갱신이 늦어도 1분 안에 전 isolate 에 퍼진다. 추가 비용은 60초당 KV 읽기 1회.
+ *   'corpus-version' 키가 아직 없으면(null) 값이 늘 같으므로 종전과 동일하게 동작한다.
  */
+const VER_TTL_MS = 60_000;
 let INDEX_CACHE = null;
+let INDEX_VER = null;    // 현재 캐시가 만들어진 시점의 corpus-version
+let VER_CHECKED_AT = 0;  // 마지막 버전 확인 시각
 async function loadIndex(env) {
-  if (INDEX_CACHE) return INDEX_CACHE;
+  if (INDEX_CACHE && Date.now() - VER_CHECKED_AT < VER_TTL_MS) return INDEX_CACHE;
   if (!env.CORPUS_KV) {
     throw new Error("CORPUS_KV 바인딩이 없습니다 (wrangler.toml 의 [[kv_namespaces]] 확인).");
+  }
+  // 버전을 인덱스보다 "먼저" 읽는다. 도중에 업로드가 끼어들면 (옛 버전 + 새 인덱스)가 되어
+  // 다음 확인 때 한 번 더 재로드할 뿐이다. 반대 순서면 새 버전에 옛 인덱스를 붙여 굳힌다.
+  const ver = await env.CORPUS_KV.get("corpus-version");
+  if (INDEX_CACHE && ver === INDEX_VER) {
+    VER_CHECKED_AT = Date.now();
+    return INDEX_CACHE;
   }
   const data = await env.CORPUS_KV.get("corpus-index", { type: "json" });
   if (!Array.isArray(data) || data.length === 0) {
     throw new Error("KV에 corpus-index 가 없거나 비어 있습니다 — scripts/kv-upload.sh 로 업로드하세요.");
   }
+  if (INDEX_CACHE) {
+    console.log(`[index] corpus-version 변경 (${INDEX_VER} → ${ver}) — 캐시 재로드 ${data.length}청크`);
+    VEC_CACHE = undefined; // 벡터도 함께 다시 읽는다(재임베딩됐을 수 있음)
+  }
   INDEX_CACHE = data;
+  INDEX_VER = ver;
+  VER_CHECKED_AT = Date.now();
   return INDEX_CACHE;
 }
 
@@ -130,7 +156,8 @@ async function isAuthed(request, env) {
 }
 
 export default {
-  async fetch(request, env) {
+  // ctx 는 미답변 질문 기록을 응답 이후로 미루기 위해 받는다(ctx.waitUntil).
+  async fetch(request, env, ctx) {
     const url = new URL(request.url);
     const path = url.pathname;
 
@@ -215,7 +242,7 @@ export default {
     if (!env.DEEPSEEK_KEY) return json({ error: "서버에 DEEPSEEK_KEY 미설정" }, 500);
 
     try {
-      const { question, history = [], scope = {} } = await request.json();
+      const { question, history = [], scope = {}, q_type: qType } = await request.json();
       if (!question || !question.trim()) return json({ error: "질문이 비어 있습니다" }, 400);
 
       /* 클라이언트 입력 검증.
@@ -269,6 +296,15 @@ export default {
       // 검색결과 전체를 스캔(핵심 조문이 상위 밖일 수 있음), 최대 8개 참조 추가.
       if (law || ordRegion) hits = expandReferences(hits, index, allowedTypes, 3, hits.length);
       const { answer: text, sources } = await generate(question, safeHistory, env, hits);
+
+      /* 답하지 못한 질문을 기록한다(D1). 응답을 먼저 돌려주고 뒤에서 쓴다 —
+       * 기록이 느리거나 실패해도 사용자 답변은 이미 나간 뒤다.
+       * 무엇이 '실패'인지, 무엇을 남기는지는 unanswered.mjs 참조. */
+      ctx?.waitUntil(
+        logIfUnanswered(env, request, {
+          question, answer: text, sources, hits, law, prec, ordRegion, qType,
+        })
+      );
       return json({ answer: text, sources });
     } catch (e) {
       return json({ error: String(e) }, 500);

@@ -23,6 +23,17 @@ GA_ID = "G-KS5S1ZS621"
 binding = "CORPUS_KV"
 id = "dfae6c10495d4a2cae9cd8ca707ff6be"
 
+# 미답변 질문 기록용 D1. 답하지 못한 질문(검색0건·모델거절·근거미표시)만 쌓인다.
+# 최초 1회:
+#   npx wrangler d1 create jeongbi-logs        → 출력된 database_id 를 아래에 기입
+#   node scripts/unanswered.mjs --init         → 테이블 생성(schema.sql)
+# 검토:  node scripts/unanswered.mjs
+# 이 바인딩이 없어도 챗봇은 정상 동작한다(기록 기능만 꺼짐).
+[[d1_databases]]
+binding = "LOGS_DB"
+database_name = "jeongbi-logs"
+database_id = "REPLACE_WITH_D1_DATABASE_ID"
+
 # Workers AI 바인딩 — 임베딩(@cf/baai/bge-m3)을 런타임에 호출(벡터 하이브리드 검색).
 [ai]
 binding = "AI"
