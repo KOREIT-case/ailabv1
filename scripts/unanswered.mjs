@@ -19,7 +19,7 @@
  *   node scripts/unanswered.mjs --resolve <qhash> --status 해결 \
  *        --expect "도시 및 주거환경정비법 제74조"    → tests/golden.jsonl 에 회귀셋 추가
  *
- * 검토 워크플로 (docs/HANDOFF.md §5)
+ * 검토 워크플로
  *   1) 목록 확인 — hit_count 가 큰 것부터. 여러 사람이 반복해 막힌 질문이 우선순위다.
  *   2) --id 로 top_hits 를 보고 원인을 가른다:
  *        · 검색 상위가 전부 무관 + 법률 무관 질의  → 범위밖   (무시)
