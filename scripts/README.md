@@ -19,3 +19,19 @@
 
 > 주의: 개정 감지 API는 '답변 경로'가 아니라 '알림 경로'에만 쓴다.
 > 챗봇 답변은 항상 corpus의 로컬 md에만 근거한다.
+
+## 3. 검색 품질 회귀 테스트 (`test-golden`)
+`docs/검색품질_루프리포트.md`의 실무 질문 50개를 worker와 같은 경로로 돌려,
+기대 조문이 몇 위에 오는지 측정한다. `retrieve.mjs`의 튜닝 상수를 건드릴 때마다
+실행해 **다른 질문이 깨지지 않았는지** 확인하는 것이 목적이다.
+
+```bash
+node scripts/build-index.mjs                                   # 인덱스 먼저 생성
+node scripts/test-golden.mjs --diff scripts/golden-baseline.json   # 회귀 확인
+node scripts/test-golden.mjs --out scripts/golden-baseline.json    # 기준선 갱신
+```
+
+- 질문·기대조문: `scripts/golden-set.json`
+- 기준선: `scripts/golden-baseline.json` (개선을 반영했으면 함께 갱신하고 커밋)
+- 판정은 "기준선 대비 회귀 여부". 미검색 건수 자체는 아직 안 고친 결함(P2·P3·P12 등)
+  때문이므로 0이 되기 전까지는 실패로 보지 않는다.

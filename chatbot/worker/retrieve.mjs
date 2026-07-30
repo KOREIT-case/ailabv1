@@ -28,6 +28,13 @@ const JOSA = [
   "된", "될", "됨", "돼", "함", "할",
 ];
 
+// ★최장일치 — 위 배열은 읽기 좋으라고 종류별로 묶어 뒀을 뿐 길이순이 아니다.
+// 그대로 앞에서부터 매칭하면 짧은 조사가 먼저 걸려 어미가 덜 벗겨진다:
+//   "해제되는"→(는)→"해제되"   "징수하나요"→(나요)→"징수하"   "선정하나요"→"선정하"
+// 핵심 명사(해제·징수·선정)가 검색어에서 빠져 조문 제목 가중을 못 받는다.
+// 긴 접미사부터 시도해 가장 많이 벗겨낸 스템을 쓴다.
+const JOSA_SORTED = [...JOSA].sort((a, b) => b.length - a.length);
+
 // 법령 용어의 가운뎃점(ㆍ·・) 제거 정규화. "노후ㆍ불량건축물"↔"노후불량건축물",
 // "시ㆍ도지사"↔"시도지사", "시장ㆍ군수"↔"시장군수" 를 같게 매칭시킨다.
 export function norm(s) {
@@ -105,7 +112,7 @@ export function tokenize(q) {
   const addWithStem = (t) => {
     out.add(t);
     if (/[가-힣]/.test(t)) {
-      for (const j of JOSA) {
+      for (const j of JOSA_SORTED) {
         if (t.length > j.length + 1 && t.endsWith(j)) { out.add(t.slice(0, -j.length)); break; }
       }
     }
