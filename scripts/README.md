@@ -35,3 +35,24 @@ node scripts/test-golden.mjs --out scripts/golden-baseline.json    # 기준선 �
 - 기준선: `scripts/golden-baseline.json` (개선을 반영했으면 함께 갱신하고 커밋)
 - 판정은 "기준선 대비 회귀 여부". 미검색 건수 자체는 아직 안 고친 결함(P2·P3·P12 등)
   때문이므로 0이 되기 전까지는 실패로 보지 않는다.
+
+## 4. 배포 (`deploy.sh` / GitHub Actions)
+배포가 네 조각(인덱스 빌드 → KV 업로드 → 워커 배포 → 구주소 리다이렉트)이라
+하나만 빠뜨리면 증상이 헷갈린다. 한 번에 수행한다.
+
+```bash
+bash scripts/deploy.sh          # 전체
+bash scripts/deploy.sh corpus   # 자료만 (인덱스 + KV)
+bash scripts/deploy.sh code     # 코드만 (워커 + 리다이렉트)
+```
+
+모바일에서는 터미널·wrangler 로그인이 안 되므로 **GitHub Actions 버튼**을 쓴다:
+`Actions → 챗봇 배포 → Run workflow`. 최초 1회 저장소 시크릿
+`CLOUDFLARE_API_TOKEN` / `CLOUDFLARE_ACCOUNT_ID` 등록이 필요하다
+(`.github/workflows/deploy.yml` 상단 주석 참조).
+
+## 5. 아직 연결되지 않은 회귀 데이터
+`tax-cases.json`(114문항) / `proc-cases.json`(51문항)은 세무·절차 회귀 질문셋이다.
+원래 실행기(`test-tax.mjs`)가 `expandTaxContext`·`expandRedevContext`·`TAX_INTENT` 등
+**세무 라우팅 로직에 묶여 있어** 그 로직 없이는 돌지 않는다. 질문셋 자체는 손실되면
+아까우므로 데이터만 먼저 옮겨 뒀다. 세무 라우팅 이식 여부를 정한 뒤 연결한다.

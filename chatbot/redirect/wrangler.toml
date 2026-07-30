@@ -1,0 +1,8 @@
+# 구주소(dosijeongbi-chatbot) 를 현행 주소(jeongbi)로 넘기는 리다이렉트 워커.
+# name 이 기존 워커와 같아야 그 워커를 덮어쓴다 — 새로 만드는 게 아니다.
+name = "dosijeongbi-chatbot"
+main = "worker.js"
+compatibility_date = "2026-07-26"
+
+# 바인딩 없음 — KV·AI·시크릿이 필요 없는 순수 리다이렉트다.
+# 덮어쓰면 구주소에 남아 있던 옛 corpus 바인딩·시크릿 참조도 함께 사라진다.
