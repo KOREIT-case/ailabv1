@@ -47,6 +47,18 @@ export function classifyFailure(answer, sources, hits) {
   return null;
 }
 
+/* 네 번째 원인 — 사용자 신고.
+ * 위 3종은 전부 "답을 못 한" 경우다. 답은 나왔는데 **틀린** 경우는 기계가 알 수 없다.
+ * (근거를 갖춰 그럴듯하게 답하면 어떤 자동 판별에도 안 걸린다.)
+ * 그래서 화면의 '이 답변 이상해요' 버튼으로 사람이 직접 넣는 경로를 둔다.
+ * 환각 절대 금지가 최우선 가치인데 자동 판별만으로는 이 구멍이 안 막힌다. */
+export const REPORTED = "사용자신고";
+
+/* 답변 저장 상한. 신고 건은 "왜 틀렸나"를 판단해야 하므로 본문이 상당량 필요하다.
+ * 자동 기록(거절 문구)은 어차피 짧아 이 상한에 걸리지 않는다. */
+const ANSWER_MAX = 4000;
+const NOTE_MAX = 500;
+
 /** 검색범위 라벨. 클라이언트 값을 믿지 않고 서버가 해석한 값으로 만든다. */
 export function scopeLabel(law, prec, ordRegion) {
   const parts = [];
@@ -88,77 +100,120 @@ function loginName(request) {
   return "";
 }
 
+/* 검토 큐에 한 행을 쓴다(자동 기록·사용자 신고 공용).
+ *
+ * UPSERT — 같은 질문이 또 들어오면 행을 늘리지 않고 hit_count 만 올린다.
+ *
+ * top_hits/answer_head 는 최신으로 덮는다: corpus 가 그새 바뀌었을 수 있어
+ * 진단은 마지막 사건 기준이 맞다.
+ *
+ * reason 의 CASE — **사용자 신고가 자동 분류를 이긴다.** 사람이 직접 "이 답변 이상하다"고
+ * 누른 건 기계 판별보다 강한 신호이고, 자동 기록이 나중에 덮어써서 신고를 지우면 안 된다.
+ *
+ * status 의 CASE 는 회귀 감지다 — '해결'로 닫았던 질문이 다시 실패하거나 신고되면
+ * 자동으로 '미처리'로 되돌려 검토 큐에 다시 띄운다.
+ */
+async function writeRow(env, { qhash, question, reason, qType, scope, userHash, topHits, answerHead }) {
+  const now = new Date().toISOString();
+  await env.LOGS_DB.prepare(
+    `INSERT INTO unanswered
+       (qhash, question, reason, q_type, scope, user_hash, top_hits, answer_head,
+        first_ts, last_ts, hit_count)
+     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?9, 1)
+     ON CONFLICT(qhash) DO UPDATE SET
+       hit_count   = hit_count + 1,
+       last_ts     = excluded.last_ts,
+       reason      = CASE WHEN unanswered.reason = '${REPORTED}' THEN unanswered.reason
+                          ELSE excluded.reason END,
+       top_hits    = excluded.top_hits,
+       answer_head = excluded.answer_head,
+       status      = CASE WHEN unanswered.status = '해결' THEN '미처리' ELSE unanswered.status END`
+  )
+    .bind(qhash, question, reason, qType, scope, userHash, topHits, answerHead, now)
+    .run();
+}
+
+/* 검색 결과 상위 7건을 진단용으로 직렬화. 원인 3분류의 판별 근거다.
+ * 청크 본문은 넣지 않는다(용량↑, 그리고 key 만 있으면 corpus 에서 언제든 되찾을 수 있다). */
+function serializeHits(hits) {
+  return JSON.stringify(
+    (hits || []).slice(0, 7).map((h) => ({
+      자료유형: h.chunk.자료유형,
+      법령명: h.chunk.법령명,
+      조문: h.chunk.조문,
+      사건번호: h.chunk.사건번호,
+      key: h.chunk.key,
+      score: Number((h.score || 0).toFixed(4)),
+      ref: h.ref ? 1 : undefined, // expandReferences 가 끌어온 참조 조문
+    }))
+  );
+}
+
+/** 공통 전처리. 기록 대상이 아니면 null. */
+async function prep(env, request, question) {
+  if (!env.LOGS_DB) return null; // 바인딩 없음 → 기록 기능만 꺼진다(답변은 정상)
+  const name = loginName(request).trim();
+  if (EXCLUDED_USERS.includes(name)) return null; // 운영자 점검은 큐에 넣지 않는다
+  return { qhash: await questionHash(question), userHash: name ? nameHash(name) : null };
+}
+
 /**
  * 실패한 질문을 D1에 기록한다. 성공 답변은 아무것도 하지 않는다.
  *
- * @param {Object}   env      Worker env (LOGS_DB 바인딩이 없으면 조용히 건너뛴다)
+ * @param {Object}   env      Worker env
  * @param {Request}  request  로그인 이름(who 쿠키)을 읽기 위해
  * @param {Object}   p        { question, answer, sources, hits, law, prec, ordRegion, qType }
  */
 export async function logIfUnanswered(env, request, p) {
   try {
-    if (!env.LOGS_DB) return; // 바인딩 없음 → 기록 기능만 꺼진다(답변은 정상)
-
     const reason = classifyFailure(p.answer, p.sources, p.hits);
     if (!reason) return; // 근거를 갖춘 정상 답변 → 기록 대상 아님
-
-    const name = loginName(request);
-    if (EXCLUDED_USERS.includes(name.trim())) return; // 운영자 점검은 큐에 넣지 않는다
-
-    const qhash = await questionHash(p.question);
-    const now = new Date().toISOString();
-
-    // 원인 3분류의 판별 근거. 상위 7건의 "무엇이 어느 점수로 뽑혔나"만 남긴다.
-    // 청크 본문은 넣지 않는다(용량↑, 그리고 key 만 있으면 corpus 에서 언제든 되찾을 수 있다).
-    const topHits = JSON.stringify(
-      (p.hits || []).slice(0, 7).map((h) => ({
-        자료유형: h.chunk.자료유형,
-        법령명: h.chunk.법령명,
-        조문: h.chunk.조문,
-        사건번호: h.chunk.사건번호,
-        key: h.chunk.key,
-        score: Number((h.score || 0).toFixed(4)),
-        ref: h.ref ? 1 : undefined, // expandReferences 가 끌어온 참조 조문
-      }))
-    );
-
-    const qType = Q_TYPES.has(p.qType) ? p.qType : "기타";
-
-    /* UPSERT — 같은 질문이 다시 막히면 행을 늘리지 않고 hit_count 만 올린다.
-     *
-     * top_hits/answer_head 는 최신으로 덮는다: corpus 가 그새 바뀌었을 수 있어
-     * 진단은 마지막 실패 시점 기준이 맞다.
-     *
-     * status 의 CASE 는 회귀 감지다 — '해결'로 닫았던 질문이 다시 실패하면
-     * 자동으로 '미처리'로 되돌려 검토 큐에 다시 띄운다. 자료를 넣었는데 여전히
-     * 못 답하는 상황(예: 검색 보정이 더 필요한 경우)을 놓치지 않기 위해서다. */
-    await env.LOGS_DB.prepare(
-      `INSERT INTO unanswered
-         (qhash, question, reason, q_type, scope, user_hash, top_hits, answer_head,
-          first_ts, last_ts, hit_count)
-       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?9, 1)
-       ON CONFLICT(qhash) DO UPDATE SET
-         hit_count   = hit_count + 1,
-         last_ts     = excluded.last_ts,
-         reason      = excluded.reason,
-         top_hits    = excluded.top_hits,
-         answer_head = excluded.answer_head,
-         status      = CASE WHEN unanswered.status = '해결' THEN '미처리' ELSE unanswered.status END`
-    )
-      .bind(
-        qhash,
-        p.question,
-        reason,
-        qType,
-        scopeLabel(p.law, p.prec, p.ordRegion),
-        name ? nameHash(name.trim()) : null,
-        topHits,
-        (p.answer || "").slice(0, 300),
-        now
-      )
-      .run();
+    const base = await prep(env, request, p.question);
+    if (!base) return;
+    await writeRow(env, {
+      ...base,
+      question: p.question,
+      reason,
+      qType: Q_TYPES.has(p.qType) ? p.qType : "기타",
+      scope: scopeLabel(p.law, p.prec, p.ordRegion),
+      topHits: serializeHits(p.hits),
+      answerHead: (p.answer || "").slice(0, ANSWER_MAX),
+    });
   } catch (e) {
     // 기록 실패가 답변을 망치면 안 된다. 로그만 남기고 삼킨다.
     console.log(`[unanswered] 기록 실패: ${e}`);
   }
+}
+
+/**
+ * 사용자가 '이 답변 이상해요'를 누른 건을 기록한다.
+ *
+ * 자동 판별 3종은 전부 "답을 못 한" 경우만 잡는다. 근거를 갖춰 그럴듯하게 **틀리게**
+ * 답하면 어떤 기계 판별에도 안 걸리므로, 사람이 넣는 이 경로가 유일한 탐지 수단이다.
+ *
+ * top_hits 에는 검색 상위 대신 **답변이 실제로 인용한 근거**를 넣는다(프론트가 보낸 값).
+ * 신고는 답변이 나간 뒤에 오므로 그때의 검색 결과는 서버에 남아 있지 않다.
+ * 검토 시에는 어차피 그 질문을 다시 던져 현재 검색 결과를 새로 보게 된다.
+ *
+ * @param {Object} p { question, answer, sources, note, qType, scope }
+ */
+export async function logReport(env, request, p) {
+  const base = await prep(env, request, p.question);
+  if (!base) return { ok: false, reason: "skipped" };
+  const cited = (Array.isArray(p.sources) ? p.sources : []).slice(0, 7).map((s) => ({
+    자료유형: s.자료유형, 법령명: s.법령명, 조문: s.조문,
+    사건번호: s.사건번호, 지자체: s.지자체, cited: 1, // 검색 상위가 아니라 '인용된 근거'임을 표시
+  }));
+  const note = (p.note || "").toString().slice(0, NOTE_MAX).trim();
+  await writeRow(env, {
+    ...base,
+    question: p.question,
+    reason: REPORTED,
+    qType: Q_TYPES.has(p.qType) ? p.qType : "기타",
+    scope: (p.scope || "").toString().slice(0, 60),
+    topHits: JSON.stringify(cited),
+    // 신고 사유를 답변 앞에 붙여둔다 — 검토 화면(--id)에서 제일 먼저 보이게.
+    answerHead: (note ? `【신고 사유】 ${note}\n\n` : "") + (p.answer || "").slice(0, ANSWER_MAX),
+  });
+  return { ok: true };
 }

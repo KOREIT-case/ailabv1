@@ -14,7 +14,7 @@
  */
 import { generate } from "./pipeline.mjs";
 import { retrieve, retrieveHybrid, normalizeVec, expandReferences } from "./retrieve.mjs";
-import { logIfUnanswered } from "./unanswered.mjs";
+import { logIfUnanswered, logReport } from "./unanswered.mjs";
 import CHAT_HTML from "../public/index.html"; // 채팅 화면 (wrangler Text 룰로 문자열 번들)
 import bg1 from "./bg/bg1.jpg"; // 배경 이미지 4종 (Data 룰 → ArrayBuffer)
 import bg2 from "./bg/bg2.jpg";
@@ -235,9 +235,36 @@ export default {
       return res;
     }
 
-    // 질문 API: 인증 필수
+    // 질문 API·신고 API: 인증 필수
     if (!(await isAuthed(request, env))) {
       return json({ error: "unauthorized" }, 401);
+    }
+
+    /* 답변 신고 — 화면의 '이 답변 이상해요' 버튼.
+     * 자동 판별(검색0건·모델거절·근거미표시)은 "답을 못 한" 경우만 잡는다.
+     * 근거를 갖춰 그럴듯하게 틀리게 답하는 건 기계가 알 수 없어, 사람이 넣는 이 경로가
+     * 유일한 탐지 수단이다. 자동 기록과 같은 테이블에 reason='사용자신고'로 들어가
+     * 검토 워크플로(scripts/unanswered.mjs)를 그대로 탄다.
+     * 실패해도 사용자에게는 조용히 넘어간다 — 신고가 안 됐다고 화면을 깨뜨릴 이유가 없다. */
+    if (path === "/report") {
+      try {
+        const b = await request.json();
+        const q = (b.question || "").toString().trim();
+        if (!q) return json({ ok: false }, 400);
+        if (q.length > 2000) return json({ ok: false, error: "질문이 너무 깁니다" }, 400);
+        const r = await logReport(env, request, {
+          question: q,
+          answer: (b.answer || "").toString(),
+          sources: b.sources,
+          note: b.note,
+          qType: b.q_type,
+          scope: b.scope,
+        });
+        return json({ ok: !!r.ok });
+      } catch (e) {
+        console.log(`[report] 실패: ${e}`);
+        return json({ ok: false }, 200); // 신고 실패로 화면이 깨지지 않게
+      }
     }
     if (!env.DEEPSEEK_KEY) return json({ error: "서버에 DEEPSEEK_KEY 미설정" }, 500);
 

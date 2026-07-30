@@ -98,5 +98,25 @@ for (const q of ["오늘 서울 날씨 어때?", "회사 연차 규정 알려줘
      r.sources.length ? `근거 ${r.sources.length}건이 붙음` : "");
 }
 
+/* 5) 답변 신고 — 답은 나왔는데 틀린 경우를 잡는 유일한 경로다.
+ * 여기서는 '경로가 살아 있는지'만 본다. 실제 접수 여부는 확인하지 않는다:
+ * 로그인 이름 '상태점검'이 EXCLUDED_USERS 라서 검토 큐에 들어가지 않기 때문이다
+ * (점검이 큐를 오염시키면 안 되므로 의도된 동작이다). */
+console.log("\n[답변 신고]");
+ok(/이 답변 이상해요/.test(html), "신고 버튼이 화면에 실려 있음");
+const repNoAuth = await fetch(`${SITE}/report`, { method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({ question: "x", answer: "y" }) });
+ok(repNoAuth.status === 401, "미인증 신고 차단", `HTTP ${repNoAuth.status}`);
+const repEmpty = await fetch(`${SITE}/report`, { method: "POST",
+  headers: { "Content-Type": "application/json", Cookie: ck },
+  body: JSON.stringify({ question: "", answer: "y" }) });
+ok(repEmpty.status === 400, "빈 질문 신고 거부", `HTTP ${repEmpty.status}`);
+const repOk = await fetch(`${SITE}/report`, { method: "POST",
+  headers: { "Content-Type": "application/json", Cookie: ck },
+  body: JSON.stringify({ question: "점검용 신고", answer: "점검", sources: [], q_type: "기타" }) });
+ok(repOk.status === 200, "신고 경로 응답", `HTTP ${repOk.status}`);
+ok((await repOk.json()).ok === false, "  운영자 점검은 큐에 안 들어감");
+
 console.log(`\n${fail === 0 ? "✅ 전 항목 정상" : `❌ ${fail}건 실패`}`);
 process.exit(fail === 0 ? 0 : 1);

@@ -38,7 +38,8 @@ import { fileURLToPath } from "node:url";
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const WORKER_DIR = join(ROOT, "chatbot", "worker");
 const GOLDEN = join(ROOT, "tests", "golden.jsonl");
-const STATUSES = ["미처리", "자료추가", "검색보정", "범위밖", "보류", "해결"];
+// 프롬프트보정: 자료도 맞고 검색도 맞는데 모델이 잘못 해석한 경우(신고 건에서 주로 나온다).
+const STATUSES = ["미처리", "자료추가", "검색보정", "프롬프트보정", "범위밖", "보류", "해결"];
 
 /* ── 인자 파싱 ── */
 const argv = process.argv.slice(2);
@@ -173,19 +174,29 @@ if (detailId) {
   console.log(`발생     ${r.hit_count}회   ${r.first_ts?.slice(0, 16)} ~ ${r.last_ts?.slice(0, 16)}   사용자 ${r.user_hash || "-"}`);
   console.log(`상태     ${r.status}${r.note ? `  — ${r.note}` : ""}`);
   console.log(`\n답변 서두\n  ${(r.answer_head || "(없음)").replace(/\n/g, "\n  ")}`);
-  console.log(`\n검색 상위 (이걸 보고 원인을 가른다)`);
+  const reported = r.reason === "사용자신고";
+  console.log(`\n${reported ? "답변이 인용한 근거" : "검색 상위 (이걸 보고 원인을 가른다)"}`);
   let hits = [];
   try { hits = JSON.parse(r.top_hits || "[]"); } catch {}
   if (!hits.length) {
-    console.log("  (없음) → 검색이 후보를 하나도 못 냈다. 범위 밖 질의이거나 corpus 에 자료가 전혀 없다.");
+    console.log(reported
+      ? "  (없음) → 근거 없이 답했다. 환각 가능성이 높으니 우선 확인할 것."
+      : "  (없음) → 검색이 후보를 하나도 못 냈다. 범위 밖 질의이거나 corpus 에 자료가 전혀 없다.");
   } else {
     hits.forEach((h, i) => {
       const name = h.법령명 || h.사건번호 || "?";
       console.log(`  ${String(i + 1).padStart(2)}. [${h.자료유형}] ${name} ${h.조문 || ""}` +
-                  `  score=${h.score}${h.ref ? "  (참조조문)" : ""}`);
+                  (h.cited ? "" : `  score=${h.score}`) + (h.ref ? "  (참조조문)" : ""));
     });
   }
-  console.log(`
+  console.log(reported ? `
+판단 가이드 (사용자 신고 — 답은 나왔는데 틀렸다는 신고다)
+  ★ 먼저 위 근거를 열어 답변 내용과 대조할 것. 신고 사유는 '답변 서두' 맨 위에 있다.
+  · 인용한 조문 자체가 틀렸거나 개정 전 내용   → --status 자료추가  (law-api-koreit 로 현행 확인)
+  · 엉뚱한 조문을 끌어와 답했다                 → --status 검색보정  (retrieve.mjs SYN/가중치)
+  · 자료는 맞는데 모델이 잘못 해석했다          → --status 프롬프트보정 (pipeline.mjs SYSTEM_PROMPT)
+  · 신고가 오해였다(답변이 맞다)                → --status 범위밖 --note "오신고"
+` : `
 판단 가이드
   · 위 목록이 질문과 전부 무관 + 법률 무관 질의  → --status 범위밖
   · 관련 조문이 corpus 에 아예 없다              → --status 자료추가  (law-api-koreit 로 조문 확보)
@@ -204,7 +215,9 @@ const limit = Number(flag("--limit")) || 30;
 const rows = d1(
   `SELECT qhash, question, reason, q_type, hit_count, status, last_ts FROM unanswered` +
     (where.length ? ` WHERE ${where.join(" AND ")}` : "") +
-    ` ORDER BY hit_count DESC, last_ts DESC LIMIT ${limit}`
+    // 사용자 신고를 맨 위로. 사람이 "이 답변 틀렸다"고 누른 건 자동 판별보다 강한 신호이고,
+    // 대전제상 '못 답한 것'보다 '틀리게 답한 것'이 더 급하다.
+    ` ORDER BY (reason='사용자신고') DESC, hit_count DESC, last_ts DESC LIMIT ${limit}`
 );
 
 if (!rows.length) {
