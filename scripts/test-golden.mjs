@@ -12,7 +12,7 @@
  *   node scripts/test-golden.mjs --out scripts/golden-baseline.json    # 기준선 갱신
  *
  * 종료코드: --diff 를 준 경우, 기준선보다 순위가 내려간 케이스가 있으면 1.
- * (미검색 12건은 아직 안 고친 결함 P2·P3·P12 등이 원인이라 그 자체로는 실패가 아니다.
+ * (미검색 9건은 아직 안 고친 결함 P3·P8·P12 등이 원인이라 그 자체로는 실패가 아니다.
  *  중요한 건 "고친 것이 다시 깨지지 않는가"이므로 판정 기준을 기준선 대비 회귀로 둔다.)
  *
  * 주의 — 로컬엔 KV 벡터가 없어 BM25 단독으로 측정한다. 배포본(하이브리드)은
@@ -34,14 +34,15 @@ const argOf = (flag) => {
   return i === -1 ? null : process.argv[i + 1];
 };
 
-/** worker.js 와 동일한 검색 경로 */
+/** worker.js 와 동일한 검색 경로 (LAW_TYPES 포함 — 유권해석·심판례도 '법령' 범위) */
+const LAW_TYPES = ["법령", "행정규칙", "유권해석", "심판례"];
 function search(q, scope = {}) {
   const { law = true, prec = false, region = null } = scope;
   const allowedTypes = [];
-  if (law) allowedTypes.push("법령", "행정규칙");
+  if (law) allowedTypes.push(...LAW_TYPES);
   if (prec) allowedTypes.push("판례");
   if (region) allowedTypes.push("조례");
-  if (!allowedTypes.length) allowedTypes.push("법령", "행정규칙");
+  if (!allowedTypes.length) allowedTypes.push(...LAW_TYPES);
   let hits = retrieve(index, q, 7, allowedTypes, region);
   if (law || region) hits = expandReferences(hits, index, allowedTypes, 3, hits.length);
   return hits;
