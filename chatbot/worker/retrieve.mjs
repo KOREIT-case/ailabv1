@@ -41,6 +41,23 @@ export function norm(s) {
   return (s || "").replace(/[ㆍ·・]/g, "");
 }
 
+/**
+ * 조문제목이 '정의 조문'인가. build-index.mjs(호 단위 서브청크 분할)와
+ * retrieve(정의 가중)가 **같은 판정**을 써야 하므로 여기서 한 번만 정의하고 공유한다.
+ *
+ * 단순 /정의/ 로 보면 '지ㆍ정의', '규ㆍ정의', '결ㆍ정의', '조ㆍ정의' 처럼 다른 단어의
+ * 끝음절 + 조사 '의'에 걸린다. 실측 오탐 131청크:
+ *   시행규정의 작성(45) · 분쟁조정의 절차 등(16) · 정비구역 지정의 특례(12) ·
+ *   특별정비구역 지정의 해제(11) · 사업시행자 지정의 고시 등(5) …
+ * 이들이 호 단위로 조각나고 정의 가중(x1.5~3)까지 받아, 36~50자짜리 조각이
+ * BM25 길이정규화로 본조문을 밀어내고 상위를 독식했다.
+ *
+ * '…의 정의 등'(학술단체의 정의 등 등 16청크)은 진짜 정의 조문이므로 '등'을 허용한다.
+ */
+export function isDefinitionArticle(title) {
+  return /^정의(\s*등)?$|용어의 정의|의 정의(\s*등)?$/.test(title || "");
+}
+
 // 실무 약어 → 정식 명칭(확장 토큰). 질의에 약어가 있으면 정식명 토큰도 함께 검색.
 const ABBR = {
   "도정법": "도시 주거환경정비법", "도시정비법": "도시 주거환경정비법",
@@ -210,7 +227,7 @@ export function retrieve(index, question, k = 5, allowedTypes = null, region = n
     if (typeof c.조문 === "string" && c.조문.startsWith("[별표]")) score *= 0.6;
     // 정의 조문 가중. 특히 호/목 단위 정의 서브청크(용어 하나만 담김)는 tf가 낮아
     // 밀리므로 더 강하게. "뭐야/이란/정의" 같은 정의 질의면 훨씬 강하게 우선.
-    if (score > 0 && c.제목 && /정의/.test(c.제목)) {
+    if (score > 0 && isDefinitionArticle(c.제목)) {
       const isSub = typeof c.조문 === "string" && /(호|목)$/.test(c.조문);
       score *= defIntent ? (isSub ? 3 : 1.6) : (isSub ? 1.5 : 1.15);
     }

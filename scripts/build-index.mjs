@@ -10,6 +10,9 @@
 import { readFileSync, writeFileSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
+// 정의 조문 판정은 retrieve.mjs 와 반드시 같아야 한다(한쪽만 바뀌면 조각은 만들어지는데
+// 가중은 안 붙거나 그 반대가 된다). 판정 함수를 공유해 드리프트를 원천 차단한다.
+import { isDefinitionArticle } from "../chatbot/worker/retrieve.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const CORPUS_DIRS = [
@@ -124,11 +127,12 @@ function splitChunks(body, meta) {
   }
   push();
 
-  // 정의 조문(조문제목에 '정의')은 호(號) 단위로도 서브청크를 만든다.
+  // 정의 조문은 호(號) 단위로도 서브청크를 만든다.
   // → "가로주택정비사업이 뭐야?" 처럼 특정 용어 정의를 콕 집어 검색되게.
+  // 판정은 retrieve.mjs 의 isDefinitionArticle 공유(단순 /정의/ 는 '지정의'·'규정의' 오탐).
   const subs = [];
   for (const c of chunks) {
-    if (!(c.제목 && /정의/.test(c.제목))) continue;
+    if (!isDefinitionArticle(c.제목)) continue;
     const bodyLines = c.text.split("\n").slice(1); // 헤딩 제외
     let buf = null;
     const flush = () => {
