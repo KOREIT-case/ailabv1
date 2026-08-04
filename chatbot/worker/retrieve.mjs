@@ -112,13 +112,36 @@ const TAX_INTENT = /취득세|재산세|양도소득|종합부동산|종부세|�
 const NOG_LAW = /^노후계획도시/;
 const NOG_INTENT = /노후계획도시|노후도시|노계|특별정비|재정비촉진|1기\s*신도시|신도시/;
 
-// 주변 법령 감점 배수. 세법·노후계획도시법은 해당 의도가 없으면 감점해 도정법 본법을 우선.
+/* 빈집 및 소규모주택 정비 특례법 — 일반 정비사업 질의에서 상위를 독식한다.
+ * 원인: 이 법의 사업명이 "소규모재개발사업"·"소규모재건축사업"이라 사용자가 그냥
+ * "재개발"·"재건축"이라고 쓴 질의에 **부분문자열로** 걸린다. 게다가 조문 제목까지
+ * 정확히 맞아 제목 가중까지 받아, 도정법 본법을 점수로 이긴다.
+ * 실측(2026-07-30 배포본): "우리가 사업시행자인데 조합설립 동의율 얼마나 받아야 해요?"
+ * → 근거가 빈집법 제23조·시행령 제20조 뿐이고 도정법 제35조가 아예 안 나왔다.
+ * 재개발·재건축 담당자가 가장 기본적인 질문에서 틀린 법을 받는다.
+ *
+ * ★ SMALL_INTENT 에 '재개발'·'재건축' 단독은 넣지 않는다. 넣으면 도정법 질의에서도
+ *   감점이 풀려 이 수정이 무의미해진다. 소규모정비 고유어(가로주택·자율주택·빈집 등)와
+ *   '소규모'가 붙은 형태만 신호로 본다. */
+const SMALL_LAW = /^빈집 및 소규모주택/;
+const SMALL_INTENT = /빈집|가로주택|자율주택|소규모재개발|소규모재건축|소규모주택정비|소규모정비|소규모\s*주택|빈소법/;
+
+/* 수도권정비계획법 — 정비'사업'과 무관한 수도권 정비계획(과밀억제권역 등) 법인데
+ * '정비'·'심의'·'부담금'·'위원회' 같은 흔한 낱말로 상위에 끼어든다.
+ * 루프리포트 Q31(총회 의결정족수)에서 실무위원회 의결정족수가, Q45(정비사업비 부과·징수)
+ * 에서 부담금 조문이 노이즈로 올라온 사례. */
+const CAPITAL_LAW = /^수도권정비계획법/;
+const CAPITAL_INTENT = /수도권정비|과밀억제|성장관리권역|자연보전권역|총량규제|인구집중유발/;
+
+// 주변 법령 감점 배수. 해당 의도가 없으면 감점해 도정법 본법을 우선한다.
 // 어휘(retrieve)·하이브리드(retrieveHybrid) 양쪽 최종 점수에 동일 적용(벡터 rerank가 감점을
-// 무시하고 세법 조문을 끌어올리는 것 방지).
-function domainPenalty(name, taxIntent, nogIntent) {
+// 무시하고 주변 법령을 끌어올리는 것 방지).
+function domainPenalty(name, taxIntent, nogIntent, smallIntent, capitalIntent) {
   let p = 1;
   if (!taxIntent && TAX_LAW.test(name || "")) p *= 0.35;
   if (!nogIntent && NOG_LAW.test(name || "")) p *= 0.5;
+  if (!smallIntent && SMALL_LAW.test(name || "")) p *= 0.5;
+  if (!capitalIntent && CAPITAL_LAW.test(name || "")) p *= 0.35;
   return p;
 }
 
@@ -184,6 +207,8 @@ export function retrieve(index, question, k = 5, allowedTypes = null, region = n
   const defIntent = /뭐|무엇|무슨|정의|이란|개념|뜻/.test(question); // 정의 질의 여부
   const taxIntent = TAX_INTENT.test(question); // 세금 질의 여부(아니면 세법 청크 감점)
   const nogIntent = NOG_INTENT.test(question); // 노후계획도시 질의 여부(아니면 노후법 감점)
+  const smallIntent = SMALL_INTENT.test(question);     // 소규모주택정비 질의 여부(아니면 빈집법 감점)
+  const capitalIntent = CAPITAL_INTENT.test(question); // 수도권정비계획 질의 여부(아니면 감점)
   // 매칭용 정규화 텍스트를 청크에 캐시(모듈 스코프 index 재사용 시 1회만 계산).
   // 매칭텍스트에 법령명을 덧붙여 "지방세법 취득세"처럼 법 지정 질의가 그 법으로 향하게.
   for (const c of pool) if (c.__n === undefined) {
@@ -222,7 +247,7 @@ export function retrieve(index, question, k = 5, allowedTypes = null, region = n
       matched.push(t);
     }
     // 세법·노후계획도시법은 해당 의도가 아니면 감점(무관 조문이 상위 차지 방지).
-    score *= domainPenalty(c.법령명, taxIntent, nogIntent);
+    score *= domainPenalty(c.법령명, taxIntent, nogIntent, smallIntent, capitalIntent);
     // 별표(서식·표)는 참고자료로, 본조문보다 낮춤 → 서식 노이즈가 조문을 밀어내지 않게.
     if (typeof c.조문 === "string" && c.조문.startsWith("[별표]")) score *= 0.6;
     // 정의 조문 가중. 특히 호/목 단위 정의 서브청크(용어 하나만 담김)는 tf가 낮아
@@ -278,13 +303,15 @@ export function retrieveHybrid(index, vecStore, queryVec, question, k = 5, allow
   // → 벡터가 세법 조문(예: 소득세법 양도의 정의)을 끌어올리는 걸 막기 위해 최종 점수에도 감점 적용.
   const taxIntent = TAX_INTENT.test(question);
   const nogIntent = NOG_INTENT.test(question);
+  const smallIntent = SMALL_INTENT.test(question);
+  const capitalIntent = CAPITAL_INTENT.test(question);
   // RRF 융합(어휘 순위 + 벡터 순위). 어휘 후보 안에서 의미까지 상위인 것을 끌어올림.
   const RK = 20;
   return withVec
     .map((x) => ({
       chunk: x.chunk,
       score: (1 / (RK + x.bmRank) + 1 / (RK + (vRank.get(x.chunk.key) ?? NO_VEC_RANK)))
-        * domainPenalty(x.chunk.법령명, taxIntent, nogIntent),
+        * domainPenalty(x.chunk.법령명, taxIntent, nogIntent, smallIntent, capitalIntent),
     }))
     .sort((a, b) => b.score - a.score)
     .slice(0, k);
