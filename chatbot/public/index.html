@@ -108,6 +108,7 @@
   .bot .rep button{background:none;border:none;color:var(--dim);font-size:11px;
     cursor:pointer;padding:0;text-decoration:underline;font-family:inherit}
   .bot .rep button:hover{color:var(--accent)}
+  .bot .rep .sep{margin:0 7px;opacity:.5}
   .bot .rep.done{color:var(--accent);opacity:1}
   .bot .rep input{background:#0c0e12;border:1px solid var(--border);color:var(--fg);
     border-radius:6px;padding:4px 7px;font-size:12px;font-family:inherit;width:min(340px,60vw)}
@@ -381,18 +382,38 @@
     return el;
   }
 
-  /* '이 답변 이상해요' — 답이 나왔는데 틀린 경우를 잡는 유일한 경로.
-     서버의 자동 판별은 '답을 못 한' 경우만 잡는다. 근거를 갖춰 그럴듯하게 틀리면
-     기계는 알 수 없으므로 사람이 눌러줘야 한다.
-     사유는 선택 — 안 써도 신고는 접수된다(문턱을 낮게). */
+  /* 답변 피드백 두 갈래 — '도움됐어요' / '이 답변 이상해요'.
+     · 이상해요: 답이 나왔는데 틀린 경우를 잡는 유일한 경로. 서버의 자동 판별은
+       '답을 못 한' 경우만 잡는다. 근거를 갖춰 그럴듯하게 틀리면 기계는 알 수 없다.
+       사유는 선택 — 안 써도 접수된다(문턱을 낮게). D1 검토 큐로 간다.
+     · 도움됐어요: **분모를 만들기 위해 있다.** 신고 버튼만 두면 부정 신호만 쌓여,
+       시험가동이 끝날 때 "쓸 만했나"를 판단할 근거가 없다. "답변 200건 중 도움됨
+       140건" 같은 문장이 나오려면 긍정 신호를 같이 세야 한다.
+       이쪽은 서버에 안 보낸다 — D1 검토 큐는 '고쳐야 할 것'만 담아야 unanswered.mjs
+       워크플로가 깨끗하게 유지된다. 집계는 GA4 이벤트로 충분하다. */
   function addReport(el, q, answer, sources, qType, scLabel){
     const box = document.createElement("div");
     box.className = "rep";
+    const good = document.createElement("button");
+    good.type = "button";
+    good.textContent = "도움됐어요";
+    const sep = document.createElement("span");
+    sep.className = "sep"; sep.textContent = "·";
     const btn = document.createElement("button");
     btn.type = "button";
     btn.textContent = "이 답변 이상해요";
-    box.appendChild(btn);
+    box.append(good, sep, btn);
     el.appendChild(box);
+
+    good.addEventListener("click", () => {
+      box.className = "rep done";
+      box.textContent = "고맙습니다. 계속 다듬는 데 쓰겠습니다.";
+      track("helpful_answer", {
+        q_type: qType, scope: scLabel,
+        source_count: (sources || []).length,
+        top_law: (sources && sources[0] && sources[0].법령명) || "(없음)",
+      });
+    });
 
     const send = async (note) => {
       box.className = "rep done";
