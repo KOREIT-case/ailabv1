@@ -20,6 +20,13 @@ globalThis.caches = { default: { match: async () => null, put: async () => {} } 
 const env = {
   REGION_KV: {
     async get(key, type) {
+      // 공유 카드 PNG 는 별도 폴더에 바이너리로 있다(make-og.mjs 산출물).
+      if (key.startsWith('og:')) {
+        const p = path.join(ROOT, 'data', 'og', `${key.slice(3)}.png`);
+        if (!fs.existsSync(p)) return null;
+        const buf = fs.readFileSync(p);
+        return buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength);
+      }
       const file = key === 'names' ? 'names.json'
         : key === 'meta' ? 'meta.json'
         : key.startsWith('sgg:') ? `sgg-${key.slice(4)}.json` : null;

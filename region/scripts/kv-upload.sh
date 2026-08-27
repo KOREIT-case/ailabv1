@@ -23,4 +23,11 @@ grep -q 'id = ""' wrangler.toml && {
 # wrangler v3/v4 는 'kv bulk put', 구버전은 'kv:bulk put'.
 npx wrangler kv bulk put "$BULK" --binding=REGION_KV --remote
 
+# 공유 카드 PNG 는 선택 사항이다(make-og.mjs 로 미리 구운 경우에만 있다).
+OG="$ROOT/data/og-bulk.json"
+if [[ -f "$OG" ]]; then
+  npx wrangler kv bulk put "$OG" --binding=REGION_KV --remote
+  echo "✓ 공유 카드 $(node -e "console.log(require('$OG').length)")장 업로드"
+fi
+
 echo "✓ KV 업로드 완료 — 키 $(node -e "console.log(require('$BULK').length)")개, $(du -h "$BULK" | cut -f1)"

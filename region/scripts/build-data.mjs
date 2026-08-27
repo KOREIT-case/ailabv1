@@ -208,10 +208,18 @@ const main = () => {
     .sort((a, b) => b.t - a.t);
 
   // ── 9) 워커 번들용 index.js
+  //    기준선(전국·시도 대비 어디쯤인지)을 그리려면 비교 대상의 연령·세대 분포도
+  //    같이 있어야 한다. 전국은 번들에, 시도는 각 샤드에 통째로 넣는다(둘 다 작다).
+  const pack = (o) => ({
+    c: o.c, n: o.n, t: o.t, h: o.h, m: o.m, f: o.f, a: o.a, am: o.am, af: o.af,
+    g: o.g, gf: o.gf, hs: o.s,   // hs = 세대원수별 세대수. 시도 약칭 키(s)와 겹치지 않게 이름을 나눴다
+    y: [...o.y.entries()].sort((a, b) => a[0] - b[0]),
+    ...(o.ri?.length ? { ri: o.ri } : {}),
+  });
   const slim = (o) => ({ c: o.c, n: o.n, t: o.t, h: o.h, a: o.a });
   const index = {
     month, built: new Date().toISOString(),
-    nation: { ...slim(nation), m: nation.m, f: nation.f },
+    nation: { ...pack(nation), n: '전국' },
     sido: sidos.map((o) => ({ ...slim(o), s: shortSido(o.full) })),
     sgg: allSgg.map((o) => ({
       ...slim(o), u: o.slug, p: o.c.slice(0, 2) + '00000000',
@@ -226,18 +234,12 @@ const main = () => {
   // ── 10) KV 샤드 — 시군구 하나당 파일 하나
   fs.rmSync(KV, { recursive: true, force: true });
   fs.mkdirSync(KV, { recursive: true });
-  const pack = (o) => ({
-    c: o.c, n: o.n, t: o.t, h: o.h, m: o.m, f: o.f, a: o.a, am: o.am, af: o.af,
-    g: o.g, gf: o.gf, s: o.s,
-    y: [...o.y.entries()].sort((a, b) => a[0] - b[0]),
-    ...(o.ri?.length ? { ri: o.ri } : {}),
-  });
   let bytes = 0;
   for (const g of allSgg) {
     const sido = rec.get(g.c.slice(0, 2) + '00000000');
     const json = JSON.stringify({
       month,
-      sido: { c: sido.c, n: sido.full, s: shortSido(sido.full), t: sido.t, a: sido.a },
+      sido: { ...pack(sido), n: sido.full, s: shortSido(sido.full) },
       self: { ...pack(g), u: g.slug },
       dongs: dongsOf(g).map(pack),
     });

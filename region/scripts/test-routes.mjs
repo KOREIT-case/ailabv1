@@ -14,6 +14,12 @@ const KVDIR = path.join(ROOT, 'data', 'kv');
 
 globalThis.caches = { default: { match: async () => null, put: async () => {} } };
 const env = { REGION_KV: { async get(key, type) {
+  if (key.startsWith('og:')) {
+    const pf = path.join(ROOT, 'data', 'og', `${key.slice(3)}.png`);
+    if (!fs.existsSync(pf)) return null;
+    const buf = fs.readFileSync(pf);
+    return buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength);
+  }
   const f = key === 'names' ? 'names.json' : key === 'meta' ? 'meta.json'
     : key.startsWith('sgg:') ? `sgg-${key.slice(4)}.json` : null;
   const p = f && path.join(KVDIR, f);
@@ -24,6 +30,7 @@ const env = { REGION_KV: { async get(key, type) {
 const ctx = { waitUntil: () => {} };
 const { default: worker } = await import(path.join(ROOT, 'worker', 'worker.js'));
 const { default: INDEX } = await import(path.join(ROOT, 'worker', 'index.js'));
+const V = await import(path.join(ROOT, 'worker', 'render.js'));
 
 let pass = 0; const fails = [];
 const ok = (cond, label, detail = '') => {
@@ -48,6 +55,12 @@ const cases = [
   ['/경기/정자동', 200],                                     // 시군구 건너뛰기(경기에 정자동 여럿 → 후보)
   ['/경기/분당구/정자동', 200], ['/경기/성남시', 200],        // 일반구 · 일반구를 둔 시
   ['/충북/영동군/영동읍', 200],                              // 리를 합산해 만든 읍
+  ['/vs/중구 남산동/대봉동', 200],                           // 견주기 (이름이 겹치면 시군구를 앞에)
+  ['/vs/남산동/대봉동', 200],                                // 겹치는 이름 → 후보 목록(200)
+  ['/vs/중구 남산동/중구 대봉동', 302, '/vs/중구 남산동/대봉동'], // 불필요한 수식은 떼어 정식 주소로
+  ['/vs?a=중구 남산동&b=대봉동', 302, '/vs/중구 남산동/대봉동'],
+  ['/og/2711015600.svg', 200],                               // 공유 카드
+  ['/대구/중구/남산동?card', 200],                            // 캡처용 화면
   ['/없는동네이름', 404], ['/대구/없는구/없는동', 404], ['/a/b/c/d', 404],
 ];
 for (const [p, want, loc] of cases) {
@@ -95,6 +108,29 @@ ok(offHh === 0, '법정동 세대 합계 = 시군구 세대', `어긋난 시군�
 // 전국 합계
 const sidoSum = INDEX.sido.reduce((a, s) => a + s.t, 0);
 ok(sidoSum === INDEX.nation.t, '시도 합계 = 전국 인구', `${sidoSum} vs ${INDEX.nation.t}`);
+
+// ── 2-b) 전 지역 훑기 — 인구 1명짜리 동, 세대 0인 곳처럼 극단값에서 터지지 않는지.
+//        기준선 게이지는 나눗셈이 많아서 이런 데서 조용히 NaN 이 되거나 예외가 난다.
+{
+  let swept = 0, bad = 0;
+  for (const g of INDEX.sgg) {
+    const shard = JSON.parse(fs.readFileSync(path.join(KVDIR, `sgg-${g.c}.json`), 'utf8'));
+    if (!shard.dongs.length) continue;
+    // 시군구마다 가장 작은 곳 하나 + 가장 큰 곳 하나
+    for (const d of [shard.dongs[0], shard.dongs[shard.dongs.length - 1]]) {
+      swept++;
+      try {
+        const page = V.dongPage({
+          dong: d, sgg: shard.self, sido: shard.sido, nation: INDEX.nation,
+          siblings: shard.dongs, path: '/x', origin: 'https://x.dev', month: INDEX.month,
+          shortUrl: 'https://x.dev/c/x',
+        });
+        if (/NaN|undefined|Infinity/.test(page)) { bad++; if (bad < 4) console.log('   ! 값 이상:', shard.self.n, d.n); }
+      } catch (e) { bad++; if (bad < 4) console.log('   ! 예외:', shard.self.n, d.n, e.message); }
+    }
+  }
+  ok(bad === 0, `전 시군구 최대·최소 동네 ${swept}곳 렌더`, `문제 ${bad}곳`);
+}
 
 // ── 3) 광고·외부요청이 정말 없는지 (HTML 안에 외부 호스트가 있으면 실패)
 const page = await (await worker.fetch(new Request('https://x.dev/%EB%8C%80%EA%B5%AC/%EC%A4%91%EA%B5%AC/%EB%82%A8%EC%82%B0%EB%8F%99'), env, ctx)).text();

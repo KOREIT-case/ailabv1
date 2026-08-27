@@ -9,6 +9,7 @@
 import INDEX from './index.js';
 import * as V from './render.js';
 import { toShort, fromShort } from './code.js';
+import { ogCard } from './ogcard.js';
 
 // ── 번들 색인에서 조회표를 만든다(콜드스타트 1회) ───────────────────────────
 const SIDO_BY_KEY = new Map();   // '대구' | '대구광역시' → sido
@@ -43,6 +44,14 @@ const shardOf = (env, sggCode) => kv(env, `sgg:${sggCode}`);
 const namesIndex = (env) => kv(env, 'names');
 
 const dongIn = (shard, name) => shard?.dongs.find((d) => d.n === name) || null;
+
+// 시도의 연령·세대 분포는 번들 색인에 없다(요약만 있다). 아무 샤드나 하나 열면 들어 있다.
+async function sidoFullOf(env, sido) {
+  const any = INDEX.sgg.find((g) => g.p === sido.c);
+  if (!any) return sido;
+  const shard = await shardOf(env, any.c);
+  return shard?.sido || sido;
+}
 
 // ── 응답 도우미 ──────────────────────────────────────────────────────────────
 const html = (body, status = 200, maxAge = 21600) => new Response(body, {
@@ -125,7 +134,7 @@ async function resolve(env, segs) {
 
   if (segs.length === 1) {
     const sido = SIDO_BY_KEY.get(a);
-    if (sido) return { kind: 'sido', sido };
+    if (sido) return { kind: 'sido', sido, sidoFull: await sidoFullOf(env, sido) };
     const cands = SGG_BY_NAME.get(a) || [];
     if (cands.length === 1) return { kind: 'sgg', sido: sidoOf(cands[0]), sgg: cands[0], shard: await shardOf(env, cands[0].c) };
     if (cands.length > 1) {
@@ -157,7 +166,7 @@ async function byCode(env, code) {
   }
   if (code.slice(2) === '00000000') {
     const sido = INDEX.sido.find((s) => s.c === code);
-    return sido ? { kind: 'sido', sido } : { kind: 'none' };
+    return sido ? { kind: 'sido', sido, sidoFull: await sidoFullOf(env, sido) } : { kind: 'none' };
   }
   const sgg = SGG_BY_CODE.get(code.slice(0, 5) + '00000');
   if (!sgg) return { kind: 'none' };
@@ -167,11 +176,23 @@ async function byCode(env, code) {
 }
 
 // ── 페이지 조립 ──────────────────────────────────────────────────────────────
-function renderResolved(r, { origin, path }) {
+// 모든 화면이 '전국'을 기준선으로 쓰므로 어디서나 INDEX.nation 을 함께 넘긴다.
+function renderResolved(r, { origin, path, card = false }) {
   const month = INDEX.month;
+  const nation = INDEX.nation;
   if (r.kind === 'dong') {
+    const sorted = r.shard.dongs;
+    const rank = sorted.findIndex((x) => x.c === r.dong.c) + 1;
+    if (card) {
+      return V.cardPage({
+        dong: r.dong, sgg: r.shard.self, sido: r.shard.sido, nation, month, origin, path,
+        rank, total: sorted.length, unit: V.unitName(sorted),
+        svg: ogCard({ dong: r.dong, sgg: r.shard.self, sido: r.shard.sido, month,
+          rank, total: sorted.length, unit: V.unitName(sorted) }),
+      });
+    }
     return V.dongPage({
-      dong: r.dong, sgg: r.shard.self, sido: r.shard.sido, siblings: r.shard.dongs,
+      dong: r.dong, sgg: r.shard.self, sido: r.shard.sido, nation, siblings: sorted,
       path, origin, month, shortUrl: `${origin}/c/${toShort(r.dong.c)}`,
     });
   }
@@ -179,13 +200,15 @@ function renderResolved(r, { origin, path }) {
     const meta = SGG_BY_CODE.get(r.sgg.c);
     // 수원·성남처럼 일반구를 둔 시는 밑에 동이 아니라 구가 달린다.
     if (meta?.k?.length) {
-      return V.cityPage({ sgg: r.shard.self, sido: r.shard.sido, origin, path, month,
+      return V.cityPage({ sgg: r.shard.self, sido: r.shard.sido, nation, origin, path, month,
         gus: meta.k.map((c) => SGG_BY_CODE.get(c)).filter(Boolean) });
     }
-    return V.sggPage({ sgg: r.shard.self, sido: r.shard.sido, dongs: r.shard.dongs, origin, path, month });
+    return V.sggPage({ sgg: r.shard.self, sido: r.shard.sido, nation, dongs: r.shard.dongs, origin, path, month });
   }
   if (r.kind === 'sido') {
-    return V.sidoPage({ sido: r.sido, sggs: INDEX.sgg.filter((g) => g.p === r.sido.c), origin, path, month });
+    // r.sido 는 번들 색인의 요약본이라 연령 분포가 없다 — 샤드에 실어 둔 전체본을 쓴다.
+    return V.sidoPage({ sido: r.sidoFull || r.sido, nation,
+      sggs: INDEX.sgg.filter((g) => g.p === r.sido.c), origin, path, month });
   }
   return null;
 }
@@ -237,7 +260,7 @@ function apiPayload(r, origin) {
       ...base, level: '법정동', code: r.dong.c,
       name: { sido: r.shard.sido.n, sgg: r.shard.self.n, dong: r.dong.n },
       population: { total: r.dong.t, male: r.dong.m, female: r.dong.f },
-      households: { total: r.dong.h, perHousehold: +d.perHousehold.toFixed(2), bySize: r.dong.s },
+      households: { total: r.dong.h, perHousehold: +d.perHousehold.toFixed(2), bySize: r.dong.hs },
       age: { average: r.dong.a, male: r.dong.am, female: r.dong.af,
         bandsBy10: { labels: V.TEN_LABELS, male: d.m10, female: d.f10 },
         structure: { young0_14: d.young, working15_64: d.work, old65plus: d.old } },
@@ -258,6 +281,14 @@ function apiPayload(r, origin) {
       sggs: INDEX.sgg.filter((g) => g.p === r.sido.c).map((g) => ({ code: g.c, name: g.n, total: g.t, averageAge: g.a })) };
   }
   return null;
+}
+
+// ── 견주기 ───────────────────────────────────────────────────────────────────
+// 이름 하나(또는 '중구 남산동' 처럼 두 마디)를 받아 동네 한 곳으로 좁힌다.
+async function resolveOne(env, text) {
+  const segs = String(text || '').trim().split(/\s+/).filter(Boolean).slice(0, 3);
+  if (!segs.length) return { kind: 'none' };
+  return resolve(env, segs);
 }
 
 // ── sitemap ──────────────────────────────────────────────────────────────────
@@ -328,6 +359,86 @@ export default {
       if (r.kind === 'sido') return respond(redirect(url(r.sido.s)));
     }
 
+    // 공유 카드 — .png 는 미리 구워 KV 에 올려 둔 것, 없으면 .svg 로 넘긴다.
+    if (segs[0] === 'og' && segs.length === 2) {
+      const mm = /^(\d{10})\.(svg|png)$/.exec(segs[1]);
+      if (!mm) return respond(new Response('Not Found', { status: 404 }));
+      const [, code, ext] = mm;
+      if (ext === 'png') {
+        const png = await env.REGION_KV.get(`og:${code}`, 'arrayBuffer');
+        if (png) {
+          return respond(new Response(png, { headers: {
+            'content-type': 'image/png',
+            'cache-control': 'public, max-age=86400, s-maxage=604800',
+          } }));
+        }
+        return respond(redirect(`/og/${code}.svg`, 302));
+      }
+      const r0 = await byCode(env, code);
+      if (r0.kind !== 'dong') return respond(new Response('Not Found', { status: 404 }));
+      const sorted = r0.shard.dongs;
+      const svg = ogCard({
+        dong: r0.dong, sgg: r0.shard.self, sido: r0.shard.sido, month: INDEX.month,
+        rank: sorted.findIndex((x) => x.c === r0.dong.c) + 1,
+        total: sorted.length, unit: V.unitName(sorted),
+      });
+      return respond(new Response(svg, { headers: {
+        'content-type': 'image/svg+xml; charset=utf-8',
+        'cache-control': 'public, max-age=86400, s-maxage=604800',
+      } }));
+    }
+
+    // 견주기 — /vs/남산동/대봉동  또는  /vs?a=…&b=…
+    if (segs[0] === 'vs' || segs[0] === '견주기') {
+      const qa = u.searchParams.get('a'), qb = u.searchParams.get('b');
+      const A0 = qa ?? segs[1], B0 = qb ?? segs[2];
+      if (!A0 || !B0) {
+        return respond(html(V.listPage({
+          heading: '두 동네 견주기', sub: '주소를 /vs/남산동/대봉동 처럼 쓰거나, 위 검색으로 동네를 고르세요.',
+          items: [], origin, month: INDEX.month,
+        }), 400));
+      }
+      const [ra, rb] = [await resolveOne(env, A0), await resolveOne(env, B0)];
+
+      // 한쪽 이름이 여러 곳이면 후보를 보여 주되, '반대쪽'을 주소에 그대로 들고 간다.
+      // 그냥 동네 페이지로 보내 버리면 사용자가 방금 고른 비교 대상이 사라진다.
+      for (const [side, r0, raw, other] of [['a', ra, A0, B0], ['b', rb, B0, A0]]) {
+        if (r0.kind !== 'choose') continue;
+        return respond(html(V.listPage({
+          heading: `'${raw}' — 어느 곳인가요?`,
+          sub: `같은 이름이 ${r0.hits.length}곳 있습니다. 고르면 ${other} 와 나란히 놓입니다.`,
+          origin, month: INDEX.month,
+          items: r0.hits.filter((h) => h.dong).map((h) => {
+            const q = `${h.sgg.u} ${h.dong.n}`;
+            const href = side === 'a'
+              ? `/vs/${encodeURIComponent(q)}/${encodeURIComponent(other)}`
+              : `/vs/${encodeURIComponent(other)}/${encodeURIComponent(q)}`;
+            return { href, label: `${h.sido.s} ${h.sgg.n} ${h.dong.n}`, t: h.dong.t, a: h.dong.a };
+          }),
+        })));
+      }
+      for (const [r0, raw] of [[ra, A0], [rb, B0]]) {
+        if (r0.kind !== 'dong') {
+          return respond(html(V.errorPage({
+            code: 404, message: `'${raw}' 를 찾지 못했습니다. 법정동 이름으로 적어 주세요.`, month: INDEX.month,
+          }), 404));
+        }
+      }
+
+      // 이름이 겹치는 곳이면 주소에도 시군구를 남겨야 링크가 같은 곳을 다시 연다.
+      const names = await namesIndex(env);
+      const label = (r0) => ((names?.[r0.dong.n]?.length || 0) > 1 ? `${r0.shard.self.u} ${r0.dong.n}` : r0.dong.n);
+      const canon = `/vs/${encodeURIComponent(label(ra))}/${encodeURIComponent(label(rb))}`;
+      if (decodeURIComponent(u.pathname) !== decodeURIComponent(canon) || qa || qb) {
+        return respond(redirect(canon, 302));
+      }
+      return respond(html(V.comparePage({
+        A: { dong: ra.dong, sgg: ra.shard.self, sido: ra.shard.sido },
+        B: { dong: rb.dong, sgg: rb.shard.self, sido: rb.shard.sido },
+        nation: INDEX.nation, origin, path: canon, month: INDEX.month,
+      })));
+    }
+
     // 검색
     if (segs[0] === 's' || segs[0] === '검색') {
       const q = (u.searchParams.get('q') || '').trim();
@@ -364,7 +475,8 @@ export default {
       if (canon !== u.pathname && decodeURIComponent(u.pathname) !== decodeURIComponent(canon)) {
         return respond(redirect(canon));
       }
-      return respond(html(renderResolved(r, { origin, path: canon })));
+      const card = u.searchParams.has('card');
+      return respond(html(renderResolved(r, { origin, path: canon, card })));
     }
     if (r.kind === 'sgg') {
       const canon = url(r.sido.s, r.sgg.u);
