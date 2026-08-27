@@ -83,6 +83,15 @@ ailabv1/
 
 접속: https://jeongbi.explozn87.workers.dev (비밀번호 필요)
 
+---
+
+## 같은 저장소의 다른 것 — `region/`
+
+`region/` 은 챗봇과 별개의 작은 서비스다. 행정안전부 주민등록 인구통계를
+법정동(읍·면) 단위까지 **광고 없이** 보여 주는 Cloudflare Worker.
+자료·코드·배포가 `region/` 안에서 자족적이라 챗봇과 서로 건드리지 않는다.
+→ `region/README.md`
+
 ### 로컬에서 돌려보기
 ```bash
 node scripts/build-index.mjs                              # corpus → 검색 인덱스

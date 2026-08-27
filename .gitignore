@@ -25,3 +25,7 @@ chatbot/worker/corpus-index.json
 
 # Cloudflare Wrangler 로컬 캐시
 chatbot/worker/.wrangler/
+
+# region/ 의 생성물 — 원천 CSV(약 18MB)와 빌드 결과물.
+# 배포 전에 fetch → build 로 항상 새로 만든다(통계가 매월 갱신되므로 낡은 사본이 더 위험하다).
+region/data/

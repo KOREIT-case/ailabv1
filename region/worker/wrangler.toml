@@ -1,0 +1,21 @@
+# 광고 없는 동네 인구 통계 — Cloudflare Worker 배포 설정
+#
+# 최초 1회
+#   npx wrangler login
+#   cd region/worker
+#   npx wrangler kv namespace create REGION      → 출력된 id 를 아래 [[kv_namespaces]] 에 기입
+#
+# 매달(통계 갱신 시)
+#   bash region/scripts/deploy.sh                # 내려받기 → 빌드 → KV → 배포
+#   bash region/scripts/deploy.sh data           # 자료만 갱신(KV). 코드가 그대로면 재배포 불필요
+name = "ingu"
+main = "worker.js"
+compatibility_date = "2026-07-23"
+
+# 읍면동 상세는 시군구 단위로 쪼개 KV 에 둔다(번들 크기 한도 회피 + 요청당 읽기 1회).
+# id 는 `wrangler kv namespace create REGION` 출력값으로 채운다.
+[[kv_namespaces]]
+binding = "REGION_KV"
+id = ""
+
+# 이 서비스에는 시크릿이 없다. 로그인도, 외부 API 키도, 광고 스크립트도 쓰지 않는다.
