@@ -153,20 +153,38 @@ node region/scripts/preview.mjs --dump "/대구/중구/남산동" > out.html
 
 ## 배포
 
+주소: **https://ingu.explozn87.workers.dev**
+KV 네임스페이스 `REGION`(`bea16a2b…`)은 이미 만들어 `wrangler.toml` 에 박혀 있다.
+
+### GitHub Actions (폰에서도 됨)
+
+[Actions → 인구·동네 배포](https://github.com/KOREIT-case/ailabv1/actions/workflows/region-deploy.yml)
+→ **Run workflow** → 대상 선택.
+
+원천 통계 내려받기 → 빌드 → 점검 → 공유 카드 굽기 → KV 업로드 → 워커 배포 →
+실제 응답 확인까지 한 번에 한다. 저장소 시크릿 두 개를 쓰며, 챗봇 배포(`deploy.yml`)와
+같은 것이라 이미 있으면 추가 작업이 없다.
+
+| 시크릿 | 값 |
+|---|---|
+| `CLOUDFLARE_API_TOKEN` | [API 토큰](https://dash.cloudflare.com/profile/api-tokens) → Create Token → **Edit Cloudflare Workers** 템플릿 (Workers 스크립트 편집 + Workers KV 저장소 편집) |
+| `CLOUDFLARE_ACCOUNT_ID` | Cloudflare 대시보드의 Account ID |
+
+없으면 첫 단계에서 무엇이 빠졌는지 알려 주고 멈춘다(알 수 없는 오류로 죽지 않게).
+
+정기 실행은 매월 6일 05:00 KST 로 걸려 있다 — 행안부 통계가 매월 초 갱신되기 때문.
+**단, GitHub 규칙상 정기 실행은 기본 브랜치에 합친 뒤부터 동작한다.**
+
+### 로컬
+
 ```bash
 npx wrangler login
-cd region/worker && npx wrangler kv namespace create REGION   # 출력 id 를 wrangler.toml 에 기입
-bash region/scripts/deploy.sh
-```
-
-매월 통계가 갱신되면 자료만 올리면 된다(코드가 그대로면 재배포 불필요):
-
-```bash
-bash region/scripts/deploy.sh data
+bash region/scripts/deploy.sh          # 전부
+bash region/scripts/deploy.sh data     # 자료만(코드가 그대로면 재배포 불필요)
 ```
 
 단, **행정구역 자체가 바뀐 달**(시군구 신설·통합)에는 시도·시군구 목록이 번들에 있으므로
-`deploy.sh` 전체를 돌려 재배포해야 한다.
+전체를 돌려 재배포해야 한다.
 
 ## 광고가 없다는 걸 어떻게 보장하나
 
